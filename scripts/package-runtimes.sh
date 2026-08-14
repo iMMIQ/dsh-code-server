@@ -5,7 +5,7 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 output_dir=${1:?usage: package-runtimes.sh OUTPUT_DIR}
 code_server_version=4.132.0-dsh.1
 code_server_repo=iMMIQ/code-server
-code_server_commit=f144b4046bd58ebd4add18ae273095ffce7ff70f
+code_server_commit=e3a2e1db479ea6090a6b31c5cc52a0a583720e91
 package_version=$(node -p "require('$repo_root/package.json').version")
 archive_dir=${CODE_SERVER_ARCHIVE_DIR:-}
 download_dir=
@@ -35,10 +35,10 @@ thin_package="$work_dir/dsh-code-server-$package_version.tgz"
 
 checksum_for() {
   case "$1" in
-    linux-amd64) echo 338be5e3820a1dda8578cf75015b79042aed80a8c32012840d92001f48d41d8a ;;
-    linux-arm64) echo 24960d74e6d101c22d00e87cc8c1fbc721d6e829af309040c3e8f1242a507afc ;;
-    macos-amd64) echo 8920ac3fa05ef0a8d234f58bd45f9018210e851abd2ab5f4ea0c79d160701355 ;;
-    macos-arm64) echo 6948bfec21ec204b38115de4ed233d531e17c35e3f856ca3540ce21776290d94 ;;
+    linux-amd64) echo c308f9a81363dca830121f3c0f99f32c5a728768c5aff45b0708ba06d380014a ;;
+    linux-arm64) echo 1dd2c722b967696d233cfc6530e4661555785211820c0631d3453a727089204c ;;
+    macos-amd64) echo b359f6e0cc69879e0334fe599bc1e296e030242e7b6994eb459db1ca760a58a0 ;;
+    macos-arm64) echo 05b7f571ae8378acde3efe1bad4eb6c09fef25ac4d1f638c9db33b11b2fefbdc ;;
     *) return 1 ;;
   esac
 }

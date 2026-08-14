@@ -10,7 +10,7 @@ Choose the full release package for your OS and CPU. It includes the DSH editor 
 
 ```bash
 dsh plugin --profile web add \
-  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.2.0/dsh-code-server-0.2.0-linux-amd64.tgz
+  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.1/dsh-code-server-0.1.1-linux-amd64.tgz
 dsh --profile web
 ```
 
