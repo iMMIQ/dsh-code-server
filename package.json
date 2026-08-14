@@ -1,0 +1,82 @@
+{
+  "name": "dsh-code-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Embed a loopback code-server workbench in DeepSeek Harness Web without patching DSH",
+  "keywords": [
+    "deepseek-harness",
+    "code-server",
+    "vscode",
+    "plugin"
+  ],
+  "homepage": "https://github.com/iMMIQ/dsh-code-server#readme",
+  "bugs": {
+    "url": "https://github.com/iMMIQ/dsh-code-server/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iMMIQ/dsh-code-server.git"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "bin": {
+    "dsh-code-server-runtime": "bin/dsh-code-server-runtime"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "lib/types/**/*.d.ts",
+    "bin/dsh-code-server-runtime",
+    "vendor/code-server/**",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "dsh": {
+    "bundledCodeServerVersion": "4.106.3",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsdown",
+    "test": "vitest run",
+    "check": "npm run build && npm test",
+    "prepare": "npm run build"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "@types/react": "~18.3.1",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

@@ -1,0 +1,8 @@
+# Installed as an additive profile layer by `dsh plugin add`.
+- insert:
+    - id: dsh-code-server
+      name: dsh-code-server
+      config:
+        host: 127.0.0.1
+        port: 3081
+        startupTimeoutMs: 20000

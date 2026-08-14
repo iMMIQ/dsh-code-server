@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@v4
+        with:
+          path: dsh-code-server
+
+      - name: Check out compatible DeepSeek Harness
+        uses: actions/checkout@v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
+          path: deepseek-harness
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+
+      - run: corepack enable
+      - run: corepack prepare pnpm@11.7.0 --activate
+      - run: pnpm install --frozen-lockfile
+        working-directory: dsh-code-server
+      - run: pnpm check
+        working-directory: dsh-code-server
+      - run: pnpm pack --pack-destination ../artifacts
+        working-directory: dsh-code-server
+
+      - name: Audit package paths
+        run: |
+          mkdir package-audit
+          tar -xzf artifacts/dsh-code-server-*.tgz -C package-audit
+          if grep -RIE '/home/|/Users/|\\Users\\|/tmp/' package-audit; then
+            echo 'absolute local path found in package' >&2
+            exit 1
+          fi

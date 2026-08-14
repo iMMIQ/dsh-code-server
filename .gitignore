@@ -1,0 +1,16 @@
+node_modules/
+lib/
+coverage/
+artifacts/
+vendor/code-server/
+
+*.tgz
+*.log
+*.local
+
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
