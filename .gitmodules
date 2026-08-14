@@ -1,0 +1,4 @@
+[submodule "third_party/code-server"]
+	path = third_party/code-server
+	url = https://github.com/iMMIQ/code-server.git
+	branch = dsh-v4.132.0

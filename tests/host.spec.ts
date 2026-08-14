@@ -17,7 +17,7 @@ describe('host boundary', () => {
       writeFile(join(runtime, 'dsh-runtime.json'), JSON.stringify({
         platform: process.platform === 'linux' ? 'darwin' : 'linux',
         arch: process.arch,
-        version: '4.106.3',
+        version: '4.132.0-dsh.1',
       })),
     ])
     expect(() => defaultCodeServerExecutable(runtime)).toThrow('targets')

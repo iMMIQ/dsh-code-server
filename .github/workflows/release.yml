@@ -15,6 +15,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: dsh-code-server
+          submodules: true
 
       - name: Check out compatible DeepSeek Harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -65,7 +66,7 @@ jobs:
           mkdir runtime-smoke
           printf '%s\n' '{"name":"runtime-smoke","private":true}' > runtime-smoke/package.json
           pnpm --dir runtime-smoke add "$PWD/artifacts/dsh-code-server-$package_version-linux-amd64.tgz"
-          runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep '^4.106.3 '
+          runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep '^4.132.0-dsh.1 '
 
       - name: Create GitHub Release
         env:

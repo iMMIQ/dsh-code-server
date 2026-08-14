@@ -3,11 +3,19 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 output_dir=${1:?usage: package-runtimes.sh OUTPUT_DIR}
-code_server_version=4.106.3
+code_server_version=4.132.0-dsh.1
+code_server_repo=iMMIQ/code-server
+code_server_commit=f144b4046bd58ebd4add18ae273095ffce7ff70f
 package_version=$(node -p "require('$repo_root/package.json').version")
 archive_dir=${CODE_SERVER_ARCHIVE_DIR:-}
 download_dir=
 work_dir=$(mktemp -d)
+
+source_commit=$(git -C "$repo_root/third_party/code-server" rev-parse HEAD)
+if [[ "$source_commit" != "$code_server_commit" ]]; then
+  echo "code-server submodule $source_commit does not match v$code_server_version ($code_server_commit)" >&2
+  exit 1
+fi
 
 if [[ -z "$archive_dir" ]]; then
   download_dir=$(mktemp -d)
@@ -37,10 +45,10 @@ checksum_for() {
 
 descriptor_for() {
   case "$1" in
-    linux-amd64) printf '%s\n' '{"platform":"linux","arch":"x64","version":"4.106.3"}' ;;
-    linux-arm64) printf '%s\n' '{"platform":"linux","arch":"arm64","version":"4.106.3"}' ;;
-    macos-amd64) printf '%s\n' '{"platform":"darwin","arch":"x64","version":"4.106.3"}' ;;
-    macos-arm64) printf '%s\n' '{"platform":"darwin","arch":"arm64","version":"4.106.3"}' ;;
+    linux-amd64) printf '%s\n' '{"platform":"linux","arch":"x64","version":"4.132.0-dsh.1"}' ;;
+    linux-arm64) printf '%s\n' '{"platform":"linux","arch":"arm64","version":"4.132.0-dsh.1"}' ;;
+    macos-amd64) printf '%s\n' '{"platform":"darwin","arch":"x64","version":"4.132.0-dsh.1"}' ;;
+    macos-arm64) printf '%s\n' '{"platform":"darwin","arch":"arm64","version":"4.132.0-dsh.1"}' ;;
     *) return 1 ;;
   esac
 }
@@ -51,7 +59,7 @@ for target in $targets; do
   archive_path="$archive_dir/$archive"
   if [[ ! -f "$archive_path" ]]; then
     curl --fail --location --retry 3 \
-      "https://github.com/coder/code-server/releases/download/v$code_server_version/$archive" \
+      "https://github.com/$code_server_repo/releases/download/v$code_server_version/$archive" \
       --output "$archive_path"
   fi
   printf '%s  %s\n' "$(checksum_for "$target")" "$archive_path" | sha256sum --check --status

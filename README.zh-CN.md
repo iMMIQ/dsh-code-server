@@ -4,7 +4,7 @@
 
 ## 当前兼容范围
 
-- 已针对 DeepSeek Harness commit `47f9438`、code-server `4.106.3`（Code `1.106.3`）验证。
+- 已针对 DeepSeek Harness commit `47f9438`、DSH 裁剪版 code-server `4.132.0-dsh.1`（Code `1.132.0`）验证。
 - 仅支持单用户、localhost；code-server 被强制绑定到 `127.0.0.1` 并使用 `auth none`。
 - DSH 当前的文件点击链只传递路径，不传递 tool location 中的行号，因此第一版定位到第 1 行。
 - 浏览器里是内嵌 Workbench，但 code-server 仍监听独立的 loopback 端口。DSH 的 WebSocket 路由只支持精确路径，外部插件无法在不修改 DSH 的情况下完整代理 code-server 的动态 WebSocket 路径。
@@ -14,7 +14,7 @@
 
 ## 安装
 
-选择与系统匹配的完整发布包。发布包已经包含 code-server `4.106.3`，用户不需要单独安装 IDE：
+选择与系统匹配的完整发布包。发布包已经包含 code-server `4.132.0-dsh.1`，用户不需要单独安装 IDE：
 
 | 系统 | 发布包后缀 |
 | --- | --- |
@@ -29,7 +29,7 @@
 
 ```bash
 dsh plugin --profile web add \
-  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.0/dsh-code-server-0.1.0-linux-amd64.tgz
+  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.2.0/dsh-code-server-0.2.0-linux-amd64.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```
@@ -40,7 +40,7 @@ dsh --profile web
 dsh plugin --profile web remove dsh-code-server
 ```
 
-完整包原样重分发 code-server 官方 standalone 构建，其 MIT License 和第三方声明保留在包内 `vendor/code-server` 目录。
+完整包使用 [`iMMIQ/code-server`](https://github.com/iMMIQ/code-server/tree/dsh-v4.132.0) 的已审计裁剪版：移除内置 Copilot、Chat、Agent Host 和 MCP 运行时，保留编辑器、终端、Git、Extension Host 与 LSP。对应源码提交通过 `third_party/code-server` submodule 固定；MIT License 和第三方声明保留在包内 `vendor/code-server` 目录。
 
 从源码开发时，可以构建本仓库并安装本地 checkout：
 

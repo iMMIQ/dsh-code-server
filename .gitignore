@@ -2,6 +2,7 @@ node_modules/
 lib/
 coverage/
 artifacts/
+artifacts-*.png
 vendor/code-server/
 
 *.tgz

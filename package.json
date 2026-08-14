@@ -1,6 +1,6 @@
 {
   "name": "dsh-code-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Embed a loopback code-server workbench in DeepSeek Harness Web without patching DSH",
   "keywords": [
@@ -48,7 +48,7 @@
     "README.zh-CN.md"
   ],
   "dsh": {
-    "bundledCodeServerVersion": "4.106.3",
+    "bundledCodeServerVersion": "4.132.0-dsh.1",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
@@ -62,7 +62,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsdown",
-    "test": "vitest run",
+    "test": "vitest run tests",
     "check": "npm run build && npm test",
     "prepare": "npm run build"
   },
