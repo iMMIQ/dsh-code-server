@@ -9,6 +9,7 @@
 - DSH 当前的文件点击链只传递路径，不传递 tool location 中的行号，因此第一版定位到第 1 行。
 - 浏览器里是内嵌 Workbench，但 code-server 仍监听独立的 loopback 端口。DSH 的 WebSocket 路由只支持精确路径，外部插件无法在不修改 DSH 的情况下完整代理 code-server 的动态 WebSocket 路径。
 - 唯一的非公开兼容点是浏览器插件对 `ctx.workspaces.openPath` 的可恢复包装。插件加载时会检查该方法是否存在且可写，卸载时恢复原始对象形状；DSH 升级后必须运行兼容测试。
+- bash 行克隆依赖锁定版本 DSH 的 keyed slot shadow 语义（同 key 低 priority 渲染）、`ui-primitives` 在模块表中的静态共享，以及工具渲染器的截断标记格式；这些前提全部在 `tests/dsh-compat.spec.ts` 中断言。
 
 `tests/dsh-compat.spec.ts` 会检查当前 sibling DSH checkout 的点击链、方法签名和 overlay slot。升级 DSH 后先运行 `pnpm check`；任何一项变化都会明确失败，而不是让点击行为静默退回系统默认应用。
 
@@ -71,10 +72,12 @@ Cordis patch 对 `config` 是整段替换，不是字段合并，所以覆盖时
 
 打开 DSH Web 后，右下角的 `</>` 按钮可以展开编辑器。在对话中点击 read/edit 等工具展示的文件路径也会自动展开抽屉并在已经运行的 Workbench 中打开该文件。抽屉关闭时 iframe 不会卸载，因此扩展宿主和编辑状态会继续保留。
 
+bash 工具的输出超过内存上限时，DSH 只把截断尾部送到界面，完整输出由 harness 落在系统临时目录的 spill 文件里。展开这样的 bash 卡片后会出现 **Open full output** 按钮，点击即可在 Workbench 中打开对应的完整输出文件（stdout/stderr 各自的 spill 文件都有独立按钮）。该按钮通过 shadow 注册 `tool.call.toolview` 的 `bash` key 实现：插件内置了一份与锁定版本 DSH 行为一致的 bash 行克隆，兼容性同样由 `tests/dsh-compat.spec.ts` 断言。
+
 桌面端默认使用停靠模式：编辑器占据右侧空间时，DSH 主框架会同步收窄，对话区重新排版而不会被遮挡。编辑器标题栏上的布局按钮可以在停靠和浮层之间切换，选择会保存在浏览器中。宽度不超过 800px 时自动使用全屏浮层，避免把对话区挤到不可用。
 
 插件会等到 DSH 至少注册了一个 workspace 后再创建 Workbench iframe。这样既保证 code-server 从一开始就打开正确目录，也避免其空 workspace 会话导致 `--reuse-window` 返回 500。
 
 ## 安全边界
 
-控制接口只接受同源 JSON 请求。文件会先经过 `realpath`，且必须位于 DSH 已注册 workspace 的规范路径之下。子进程使用参数数组启动，不拼接 shell 命令。该插件仍等价于给当前本机用户提供一个完整 IDE，只适用于可信 localhost 环境。
+控制接口只接受同源 JSON 请求。文件会先经过 `realpath`，且必须位于 DSH 已注册 workspace 的规范路径之下，或者是 DSH 子进程在系统临时目录 `dsh-subprocess-*` 目录内创建的输出 spill 普通文件（symlink 逃逸会被 realpath 解析后拒绝）。子进程使用参数数组启动，不拼接 shell 命令。该插件仍等价于给当前本机用户提供一个完整 IDE，只适用于可信 localhost 环境。

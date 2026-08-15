@@ -26,6 +26,42 @@ const CSS = `
 .dcs-resize:after{content:"";position:absolute;left:4px;top:0;bottom:0;width:1px;background:transparent}.dcs-resize:hover:after{background:#4daafc}
 @media(max-width:800px){.dcs-host-docked{width:100%}.dcs-root[data-docked=true] .dcs-drawer{position:absolute;width:100vw}.dcs-drawer{min-width:100vw;width:100vw}.dcs-resize{display:none}.dcs-path{display:none}.dcs-mode{display:none}}
 @media(prefers-reduced-motion:reduce){.dcs-host-docked,.dcs-drawer{transition:none}}
+/* Cloned bash tool row (DSH ui-tool bash-sample at the pinned commit), class
+   names re-prefixed; tokens reference the same dsw aliases as upstream. */
+.dcs-br-card{display:flex;flex-direction:column}
+.dcs-br-terminal{--dsl-terminal-font:var(--dsw-font-markdown-code-block-small);--dsl-terminal-line-height:18px;--dsl-terminal-output-max-height:224px;margin:4px 0 4px 4px;border:1px solid var(--dsw-alias-border-l1)}
+.dcs-br-io-card{display:flex;flex-direction:column;margin:4px 0 4px 4px;border:1px solid var(--dsw-alias-border-l1);border-radius:12px;background:var(--dsw-alias-markdown-code-block);font:var(--dsw-font-markdown-code-block-small)}
+.dcs-br-io-section{display:grid;grid-template-columns:max-content 1fr;column-gap:14px;align-items:baseline;padding:12px 16px;max-height:150px;overflow-y:auto}
+.dcs-br-io-section::-webkit-scrollbar-thumb{border:2px solid transparent;background-clip:padding-box;border-radius:6px}
+.dcs-br-io-section::-webkit-scrollbar-track{margin:6px 0}
+.dcs-br-io-label{position:sticky;top:0;align-self:start;color:var(--dsw-alias-label-caption)}
+.dcs-br-io-divider{flex:none;height:1px;background:var(--dsw-alias-border-l2)}
+.dcs-br-io-text{min-width:0;white-space:pre-wrap;word-break:break-word;color:var(--dsw-alias-label-secondary)}
+.dcs-br-io-text[data-error]{color:var(--dsw-alias-state-error-primary)}
+.dcs-br-root[data-expandable]{cursor:pointer}
+.dcs-br-root{position:relative;overflow:hidden;display:flex;align-items:center;height:24px;min-width:0}
+.dcs-br-root[data-state=running]::after{content:"";position:absolute;top:0;bottom:0;left:0;width:300px;background:linear-gradient(90deg,transparent 0%,color-mix(in srgb,var(--dsw-alias-bg-base) 60%,transparent) 55%,transparent 100%);animation:dcs-br-sweep 2.6s ease-out infinite;pointer-events:none}
+@keyframes dcs-br-sweep{0%{left:-300px}90%,100%{left:100%}}
+.dcs-br-leading{position:relative;flex:none;width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;margin-right:6px;color:var(--dsw-alias-label-tertiary)}
+.dcs-br-chevron{color:var(--dsw-alias-label-secondary)}
+.dcs-br-icon-idle{display:inline-flex;opacity:1;transition:opacity 100ms ease}
+.dcs-br-chevron-hover{position:absolute;inset:0;margin:auto;opacity:0;transition:opacity 100ms ease}
+.dcs-br-root:hover .dcs-br-icon-idle{opacity:0}
+.dcs-br-root:hover .dcs-br-chevron-hover{opacity:1}
+.dcs-br-title{flex:none;font-size:14px;line-height:24px;color:var(--dsw-alias-label-secondary)}
+.dcs-br-sep{flex:none;width:2px;height:2px;border-radius:1px;margin:0 8px;background:var(--dsw-alias-label-caption)}
+.dcs-br-summary{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:24px;color:var(--dsw-alias-label-tertiary)}
+.dcs-br-error-summary{color:var(--dsw-alias-state-error-primary)}
+.dcs-br-body-wrap{display:flex;flex-direction:column}
+/* "Open full output" pill: always visible while the card is expanded (it is
+   the primary action on a truncated stream), styled after the hover-revealed
+   Inspect pill beside it. */
+.dcs-br-open-output{display:inline-flex;align-self:flex-start;align-items:center;gap:4px;margin:4px 0 2px 4px;padding:2px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;cursor:pointer;width:max-content;transition:opacity 100ms ease,background 100ms ease,color 100ms ease}
+.dcs-br-open-output:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}
+.dcs-br-inspect{display:inline-flex;align-self:flex-start;align-items:center;gap:4px;margin:4px 0 2px 4px;padding:2px 8px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;cursor:pointer;opacity:0;transition:opacity 100ms ease}
+.dcs-br-card:hover .dcs-br-inspect,.dcs-br-inspect:focus-visible{opacity:1}
+.dcs-br-inspect:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}
+.dcs-br-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 `
 
 export function installStyles(): () => void {

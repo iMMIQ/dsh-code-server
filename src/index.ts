@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { realpath, mkdir } from 'node:fs/promises'
+import { realpath, stat, mkdir } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { homedir } from 'node:os'
-import { isAbsolute, join, relative } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 interface HostContext {
@@ -223,6 +223,43 @@ export async function authorizeWorkspacePath(path: string, workspaceRoots: reado
   return target
 }
 
+/**
+ * Accept a DSH subprocess output-spill file: a regular file directly under a
+ * `dsh-subprocess-*` directory the harness created in the OS temp dir (see
+ * `dsh-subprocess-local`'s `defaultSpillDir`). Long bash output is spilled
+ * there and only the truncated tail reaches the UI, so opening those files is
+ * how the workbench shows the full output. Resolved through realpath, so a
+ * symlink planted inside the spill dir cannot point elsewhere.
+ */
+export async function authorizeSpillPath(path: string): Promise<string> {
+  const target = await realpath(path)
+  const reject = (): Error => new Error('path is not a DSH output spill file')
+  const spillDir = dirname(target)
+  if (spillDir === target || basename(spillDir).startsWith('dsh-subprocess-') === false
+    || dirname(spillDir) !== await realpath(tmpdir())) {
+    throw reject()
+  }
+  const info = await stat(target)
+  if (!info.isFile()) throw reject()
+  return target
+}
+
+/**
+ * Authorize an open request target: a canonical file under a registered DSH
+ * workspace, or a DSH output spill file in the OS temp dir.
+ */
+export async function authorizeOpenPath(path: string, workspaceRoots: readonly string[]): Promise<string> {
+  try {
+    return await authorizeWorkspacePath(path, workspaceRoots)
+  } catch (reason) {
+    try {
+      return await authorizeSpillPath(path)
+    } catch {
+      throw reason
+    }
+  }
+}
+
 function waitForExit(child: ChildProcess): Promise<number> {
   return new Promise((resolve, reject) => {
     child.once('error', reject)
@@ -388,7 +425,7 @@ export function apply(ctx: HostContext, rawConfig: Config = {}): void {
         }
         try {
           const parsed = parseOpenRequest(await readJson(req))
-          const path = await authorizeWorkspacePath(parsed.path, roots())
+          const path = await authorizeOpenPath(parsed.path, roots())
           await sidecar.open({ ...parsed, path })
           sendJson(res, 200, { ok: true, path })
         } catch (reason) {

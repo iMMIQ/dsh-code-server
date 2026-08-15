@@ -29,4 +29,37 @@ describe('DeepSeek Harness 47f9438 compatibility seam', () => {
     )
     expect(source).toContain("'shell.overlay': { kind: 'list'; scope: 'root' }")
   })
+
+  it('still declares the keyed toolview slot our bash row shadows', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/client/ui-tool/src/client/apply.ts'), 'utf8')
+    expect(source).toContain("'tool.call.toolview': { kind: 'keyed', scope: 'session' }")
+  })
+
+  it('still registers the upstream bash row at the default priority', async () => {
+    const source = await readFile(
+      resolve(DSH_ROOT, 'packages/client/ui-tool/src/client/tool/toolviews/bash-sample.tsx'),
+      'utf8',
+    )
+    expect(source).toContain("ctx.slots.register({ name: 'tool.call.toolview', key: 'bash', locale: NS }, BashRow)")
+  })
+
+  it('still shares ui-primitives into the loader module table', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/client/web/src/seed.ts'), 'utf8')
+    expect(source).toContain("import * as UiPrimitives from '@deepseek-ai/dsh-client-ui-primitives'")
+    expect(source).toContain("'@deepseek-ai/dsh-client-ui-primitives': UiPrimitives")
+  })
+
+  it('still renders truncation markers with the embedded spill path', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/shell/tool-bash/src/render.ts'), 'utf8')
+    expect(source).toContain('[output truncated; full output: ')
+    expect(source).toContain('[some output was dropped from memory; full output: ')
+  })
+
+  it('still spills to a dsh-subprocess directory under the OS temp dir', async () => {
+    const source = await readFile(
+      resolve(DSH_ROOT, 'packages/subprocess/subprocess-local/src/spawn.ts'),
+      'utf8',
+    )
+    expect(source).toContain("mkdtempSync(join(tmpdir(), 'dsh-subprocess-'))")
+  })
 })
