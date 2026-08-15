@@ -13,7 +13,7 @@
  */
 import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, writeFileSync } from 'node:fs'
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startMockLlm } from './mock-llm.mjs'
@@ -122,6 +122,23 @@ export async function startDshStack({
       p.on('error', reject)
     })
   await runCli(['plugin', '--profile', 'e2e', 'add', pluginDir])
+
+  // The plugin's built lib keeps its @deepseek-ai/* imports external, and
+  // ESM resolves bare specifiers from the importing file upward — so the
+  // plugin checkout needs the harness CLI's @deepseek-ai packages reachable
+  // from its own node_modules or profile boot dies with ERR_MODULE_NOT_FOUND
+  // (exactly what a clean CI checkout does). Link the harness copy in; a
+  // real directory there means actual packages are installed and wins.
+  const farm = join(harnessDir, 'apps', 'cli', 'node_modules', '@deepseek-ai')
+  if (!existsSync(farm)) {
+    throw new Error(`harness checkout has no @deepseek-ai packages at ${farm}; run its install first`)
+  }
+  const link = join(pluginDir, 'node_modules', '@deepseek-ai')
+  const existing = await lstat(link).catch(() => null)
+  if (existing === null || existing.isSymbolicLink()) {
+    if (existing !== null) await rm(link, { force: true, recursive: true })
+    await symlink(farm, link, 'dir')
+  }
 
   const dshLog = []
   const dsh = spawn('node', [cli, '--profile', 'e2e', '--port', String(ports.dsh)], {
