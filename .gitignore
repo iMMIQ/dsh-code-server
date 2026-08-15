@@ -16,3 +16,4 @@ vendor/code-server/
 .idea/
 .vscode/
 tests/e2e/.artifacts/
+!tests/e2e/lib/
