@@ -62,4 +62,29 @@ describe('DeepSeek Harness 47f9438 compatibility seam', () => {
     )
     expect(source).toContain("mkdtempSync(join(tmpdir(), 'dsh-subprocess-'))")
   })
+
+  it('still exposes the listening port on the webServer service', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/host/webserver/src/index.ts'), 'utf8')
+    expect(source).toContain('get port(): number')
+    expect(source).toMatch(/this\.listenedPort = \(this\.server\.address\(\) as AddressInfo\)\.port/)
+  })
+
+  it('still lists sessionIds on every workspace entity', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/workspace/workspace/src/entity.ts'), 'utf8')
+    expect(source).toMatch(/get sessionIds\(\): readonly SessionId\[\]/)
+  })
+
+  it('still serves the agent registry with followup delivery', async () => {
+    const registry = await readFile(resolve(DSH_ROOT, 'packages/core/agent/src/index.ts'), 'utf8')
+    expect(registry).toContain('export class AgentRegistry extends Service')
+    expect(registry).toMatch(/async create\(options: CreateAgentOptions\): Promise<AgentHandle>/)
+    const runtime = await readFile(resolve(DSH_ROOT, 'packages/core/agent/src/runtime-types.ts'), 'utf8')
+    expect(runtime).toMatch(/followup\(message: UserMessage\): void/)
+  })
+
+  it('still creates user messages with a plain user source', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/llm/llm/src/message.ts'), 'utf8')
+    expect(source).toContain('user: { kind: \'user\' }')
+    expect(source).toMatch(/export function createUserMessage/)
+  })
 })

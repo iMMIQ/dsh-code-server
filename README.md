@@ -1,6 +1,6 @@
 # dsh-code-server
 
-Embeds a code-server VS Code Workbench in DeepSeek Harness Web without modifying DSH source. Clicking a DSH file reference opens the right-hand editor drawer and uses code-server's existing IPC to open the file in the live Workbench. Bash tool calls whose output was truncated show an **Open full output** button that opens the harness's full-output spill file in the Workbench.
+Embeds a code-server VS Code Workbench in DeepSeek Harness Web without modifying DSH source. Clicking a DSH file reference opens the right-hand editor drawer and uses code-server's existing IPC to open the file in the live Workbench. Bash tool calls whose output was truncated show an **Open full output** button that opens the harness's full-output spill file in the Workbench. The bundled **Ask DSH** extension adds a `DSH: Ask About This Selection` command (also in the editor context menu) that posts the active file and selection to the workspace's live DSH agent session, where the question renders as a normal user message.
 
 This first version targets a trusted, single-user localhost setup.
 

@@ -1,0 +1,38 @@
+{
+  "name": "dsh-ask",
+  "displayName": "Ask DSH",
+  "description": "Send the active editor's file and selection to the DeepSeek Harness agent session",
+  "publisher": "immiq",
+  "version": "0.1.3",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.132.0"
+  },
+  "activationEvents": [
+    "onCommand:dsh.ask"
+  ],
+  "main": "./extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "dsh.ask",
+        "title": "DSH: Ask About This Selection"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "dsh.ask",
+          "when": "editorTextFocus",
+          "group": "9_dsh@0"
+        }
+      ]
+    }
+  }
+}

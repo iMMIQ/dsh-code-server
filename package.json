@@ -41,6 +41,8 @@
     "lib/client.js.map",
     "lib/types/**/*.d.ts",
     "bin/dsh-code-server-runtime",
+    "extension/extension.js",
+    "extension/package.json",
     "vendor/code-server/**",
     "cordis.patch.yml",
     "LICENSE",

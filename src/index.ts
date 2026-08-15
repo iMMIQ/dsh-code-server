@@ -1,10 +1,18 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { realpath, stat, mkdir } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+
+/** Live DSH agent handle as used here: identity plus `followup` delivery. */
+interface AgentLike {
+  readonly id: string
+  followup(message: unknown): void
+}
 
 interface HostContext {
   logger: {
@@ -12,21 +20,30 @@ interface HostContext {
     warn(error: Error): void
   }
   workspaceRegistry: {
-    list(): readonly { path: string }[]
+    list(): readonly { path: string; sessionIds?: readonly string[] }[]
   }
   webServer: {
+    readonly port?: number
     register(route: {
       kind: 'exact'
       path: string
       handler(req: IncomingMessage, res: ServerResponse): void | Promise<void>
     }): () => void
   }
+  agents: {
+    get(id: string): AgentLike | undefined
+  }
   effect(effect: () => void | (() => void | Promise<void>), label: string): void
 }
 
 const STATUS_PATH = '/dsh-code-server/status'
 const OPEN_PATH = '/dsh-code-server/open'
+const ASK_PATH = '/dsh-code-server/ask'
+const ASK_TOKEN_HEADER = 'x-dsh-ask-token'
 const MAX_BODY_BYTES = 8 * 1024
+/** Ask bodies embed an editor selection, so they get a larger cap than /open. */
+const MAX_ASK_BODY_BYTES = 64 * 1024
+const MAX_ASK_TEXT_CHARS = 32_000
 
 export interface Config {
   executable?: string
@@ -99,15 +116,38 @@ export function defaultCodeServerExecutable(runtimeDir = BUNDLED_RUNTIME_DIR): s
 }
 
 /** Cordis service dependencies used by the host half. */
-export const inject = ['webServer', 'workspaceRegistry']
+export const inject = ['webServer', 'workspaceRegistry', 'agents']
 
 /**
  * The bundled runtime ships without lib/node, so run it on the node that is
  * already hosting DSH. All native modules in the runtime are N-API, which
- * keeps them loadable across supported node majors.
+ * keeps them loadable across supported node majors. `extra` carries the
+ * per-launch ask-endpoint facts for the bundled workbench extension.
  */
-function codeServerEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, NODE_EXEC_PATH: process.execPath }
+function codeServerEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return { ...process.env, NODE_EXEC_PATH: process.execPath, ...extra }
+}
+
+const ASK_EXTENSION_ID = 'immiq.dsh-ask'
+const ASK_EXTENSION_SOURCE = fileURLToPath(new URL('../extension/', import.meta.url))
+
+/**
+ * Stage the bundled workbench extension into the extensions dir. Any stale
+ * version of the same extension id is removed first so an upgrade replaces
+ * rather than accumulates. Runs before each sidecar start.
+ */
+export async function installAskExtension(extensionsDir: string, source = ASK_EXTENSION_SOURCE): Promise<string> {
+  const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8')) as { version?: unknown }
+  if (typeof manifest.version !== 'string' || manifest.version === '') {
+    throw new Error('dsh-ask extension manifest has no version')
+  }
+  const prefix = `${ASK_EXTENSION_ID}-`
+  for (const entry of await readdir(extensionsDir)) {
+    if (entry.startsWith(prefix)) await rm(join(extensionsDir, entry), { recursive: true, force: true })
+  }
+  const target = join(extensionsDir, `${prefix}${manifest.version}`)
+  await cp(source, target, { recursive: true })
+  return target
 }
 
 function resolveConfig(config: Config = {}): ResolvedConfig {
@@ -177,13 +217,13 @@ export function isSameOriginRequest(req: IncomingMessage): boolean {
   return site === undefined || site === 'same-origin'
 }
 
-async function readJson(req: IncomingMessage): Promise<unknown> {
+async function readJson(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   let size = 0
   const chunks: Buffer[] = []
   for await (const chunk of req) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.length
-    if (size > MAX_BODY_BYTES) throw new Error('request body is too large')
+    if (size > maxBytes) throw new Error('request body is too large')
     chunks.push(buffer)
   }
   try {
@@ -206,6 +246,64 @@ function parseOpenRequest(value: unknown): OpenRequest {
     throw new Error('column must be a positive integer')
   }
   return { path: row.path, line: line as number, column: column as number }
+}
+
+/** A workbench ask request: composed prompt text plus the anchor file. */
+export interface AskRequest {
+  text: string
+  file: string | undefined
+}
+
+/** Validate an ask body: non-empty bounded text, optional absolute file. */
+export function parseAskRequest(value: unknown): AskRequest {
+  if (typeof value !== 'object' || value === null) throw new Error('request body must be an object')
+  const row = value as Record<string, unknown>
+  if (typeof row.text !== 'string' || row.text.trim() === '') throw new Error('text must be a non-empty string')
+  if (row.text.length > MAX_ASK_TEXT_CHARS) throw new Error(`text must be at most ${String(MAX_ASK_TEXT_CHARS)} characters`)
+  if (row.file !== undefined && (typeof row.file !== 'string' || !isAbsolute(row.file))) {
+    throw new Error('file must be an absolute path')
+  }
+  return { text: row.text, file: row.file as string | undefined }
+}
+
+/** Constant-time presentation check for the ask-route bearer token. */
+export function tokensEqual(expected: string, presented: string | undefined): boolean {
+  if (typeof presented !== 'string') return false
+  const left = Buffer.from(expected, 'utf8')
+  const right = Buffer.from(presented, 'utf8')
+  return left.length === right.length && timingSafeEqual(left, right)
+}
+
+/** Workspace projection subset used to route an ask to its sessions. */
+export interface AskWorkspaceLike {
+  path: string
+  sessionIds?: readonly string[]
+}
+
+/** Find the registered workspace that canonically contains `file`. */
+export async function resolveAskWorkspace(
+  file: string,
+  workspaces: readonly AskWorkspaceLike[],
+): Promise<AskWorkspaceLike> {
+  const target = await realpath(file)
+  for (const workspace of workspaces) {
+    const root = await realpath(workspace.path)
+    if (contains(root, target)) return workspace
+  }
+  throw new Error('file is outside the registered DSH workspaces')
+}
+
+/** Pick the newest session of a workspace that has a live agent. */
+export function pickLiveSession(
+  workspace: AskWorkspaceLike,
+  get: (id: string) => AgentLike | undefined,
+): AgentLike | undefined {
+  const sessionIds = [...(workspace.sessionIds ?? [])].reverse()
+  for (const sessionId of sessionIds) {
+    const agent = get(sessionId)
+    if (agent !== undefined) return agent
+  }
+  return undefined
 }
 
 function contains(root: string, target: string): boolean {
@@ -279,10 +377,10 @@ class CodeServerSidecar {
     return this.state
   }
 
-  start(initialWorkspace: string | undefined): Promise<void> {
+  start(initialWorkspace: string | undefined, extraEnv: Record<string, string> = {}): Promise<void> {
     if (this.startPromise !== undefined) return this.startPromise
     this.state = { phase: 'starting' }
-    this.startPromise = this.startInner(initialWorkspace).catch((reason: unknown) => {
+    this.startPromise = this.startInner(initialWorkspace, extraEnv).catch((reason: unknown) => {
       this.state = { phase: 'error', message: messageOf(reason) }
       this.ctx.logger.warn(new Error(`dsh-code-server: ${messageOf(reason)}`))
       throw reason
@@ -290,8 +388,12 @@ class CodeServerSidecar {
     return this.startPromise
   }
 
-  private async startInner(initialWorkspace: string | undefined): Promise<void> {
+  private async startInner(
+    initialWorkspace: string | undefined,
+    extraEnv: Record<string, string>,
+  ): Promise<void> {
     await Promise.all([mkdir(this.config.userDataDir, { recursive: true }), mkdir(this.config.extensionsDir, { recursive: true })])
+    await installAskExtension(this.config.extensionsDir)
     const args = [
       ...commonCodeServerArgs(this.config),
       '--bind-addr', `${this.config.host}:${String(this.config.port)}`,
@@ -300,7 +402,7 @@ class CodeServerSidecar {
       '--disable-update-check',
       ...(initialWorkspace === undefined ? [] : [initialWorkspace]),
     ]
-    const child = spawn(this.config.executable, args, { stdio: ['ignore', 'ignore', 'pipe'], env: codeServerEnv() })
+    const child = spawn(this.config.executable, args, { stdio: ['ignore', 'ignore', 'pipe'], env: codeServerEnv(extraEnv) })
     this.child = child
     child.once('error', () => {
       if (this.child === child) this.child = undefined
@@ -388,7 +490,20 @@ export function apply(ctx: HostContext, rawConfig: Config = {}): void {
   const config = resolveConfig(rawConfig)
   const roots = (): string[] => ctx.workspaceRegistry.list().map(workspace => workspace.path)
   const sidecar = new CodeServerSidecar(ctx, config)
-  void sidecar.start(roots()[0]).catch(() => {})
+
+  // The workbench extension posts asks back over loopback; a fresh random
+  // token per launch gates the route (node fetch sends no Origin header, so
+  // the /open same-origin check cannot apply to it).
+  const askToken = randomUUID()
+  const askPort = ctx.webServer.port
+  const askEndpoint: Record<string, string> = {}
+  if (typeof askPort === 'number' && askPort > 0) {
+    askEndpoint.DSH_ASK_ENDPOINT = `http://127.0.0.1:${String(askPort)}${ASK_PATH}`
+    askEndpoint.DSH_ASK_TOKEN = askToken
+  } else {
+    ctx.logger.warn(new Error('dsh-code-server: DSH web port unknown; the Ask DSH workbench command will report no endpoint'))
+  }
+  void sidecar.start(roots()[0], askEndpoint).catch(() => {})
 
   ctx.effect(() => {
     const disposeStatus = ctx.webServer.register({
@@ -433,7 +548,53 @@ export function apply(ctx: HostContext, rawConfig: Config = {}): void {
         }
       },
     })
+    const disposeAsk = ctx.webServer.register({
+      kind: 'exact',
+      path: ASK_PATH,
+      handler: async (req, res) => {
+        const header = req.headers[ASK_TOKEN_HEADER]
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        if (!tokensEqual(askToken, Array.isArray(header) ? header[0] : header)) {
+          sendJson(res, 403, { error: 'valid ask token required' })
+          return
+        }
+        if (!(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+          sendJson(res, 415, { error: 'application/json required' })
+          return
+        }
+        try {
+          const parsed = parseAskRequest(await readJson(req, MAX_ASK_BODY_BYTES))
+          const workspaces = ctx.workspaceRegistry.list()
+          if (workspaces.length === 0) {
+            sendJson(res, 400, { error: 'no registered DSH workspace' })
+            return
+          }
+          const workspace = parsed.file === undefined
+            ? workspaces[0]
+            : await resolveAskWorkspace(parsed.file, workspaces)
+          const agent = pickLiveSession(workspace, id => ctx.agents.get(id))
+          if (agent === undefined) {
+            sendJson(res, 409, {
+              error: `no live DSH session for workspace ${workspace.path}; open the session in DSH and retry`,
+            })
+            return
+          }
+          agent.followup(createUserMessage({
+            content: [{ type: 'text', text: parsed.text }],
+            source: { kind: 'user' },
+          }))
+          ctx.logger.info(`dsh-code-server: ask delivered to session ${agent.id}`)
+          sendJson(res, 200, { ok: true, sessionId: agent.id, workspace: workspace.path })
+        } catch (reason) {
+          sendJson(res, 400, { error: messageOf(reason) })
+        }
+      },
+    })
     return async () => {
+      disposeAsk()
       disposeOpen()
       disposeStatus()
       await sidecar.stop()

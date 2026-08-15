@@ -1,10 +1,11 @@
 import { mkdtemp, mkdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   authorizeOpenPath, authorizeSpillPath, authorizeWorkspacePath,
-  defaultCodeServerExecutable, openCodeServerArgs,
+  defaultCodeServerExecutable, installAskExtension, openCodeServerArgs,
+  parseAskRequest, pickLiveSession, resolveAskWorkspace, tokensEqual,
 } from '../src/index.ts'
 
 describe('host boundary', () => {
@@ -98,5 +99,63 @@ describe('output spill authorization', () => {
     await expect(authorizeOpenPath(inside, [workspace])).resolves.toBe(await realpath(inside))
     await expect(authorizeOpenPath(spill, [workspace])).resolves.toBe(await realpath(spill))
     await expect(authorizeOpenPath(outside, [workspace])).rejects.toThrow('outside')
+  })
+})
+
+describe('ask route helpers', () => {
+  it('validates ask bodies', () => {
+    expect(parseAskRequest({ text: 'why does this fail?', file: '/ws/a.ts' }))
+      .toEqual({ text: 'why does this fail?', file: '/ws/a.ts' })
+    expect(parseAskRequest({ text: 'no file' })).toEqual({ text: 'no file', file: undefined })
+    expect(() => parseAskRequest({})).toThrow('non-empty')
+    expect(() => parseAskRequest({ text: '   ' })).toThrow('non-empty')
+    expect(() => parseAskRequest({ text: 'x'.repeat(32_001) })).toThrow('at most')
+    expect(() => parseAskRequest({ text: 'ok', file: 'relative/path.ts' })).toThrow('absolute')
+  })
+
+  it('compares ask tokens without accepting mismatches', () => {
+    expect(tokensEqual('secret', 'secret')).toBe(true)
+    expect(tokensEqual('secret', 'other')).toBe(false)
+    expect(tokensEqual('secret', 'secret ')).toBe(false)
+    expect(tokensEqual('secret', undefined)).toBe(false)
+    expect(tokensEqual('secret', '')).toBe(false)
+  })
+
+  it('resolves the workspace containing the anchor file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-code-server-'))
+    const [alpha, beta] = [join(root, 'alpha'), join(root, 'beta')]
+    await Promise.all([mkdir(alpha), mkdir(beta)])
+    const file = join(alpha, 'deep', 'a.ts')
+    await mkdir(dirname(file))
+    await writeFile(file, '')
+    const workspaces = [{ path: beta, sessionIds: ['s-beta'] }, { path: alpha, sessionIds: ['s-alpha'] }]
+    await expect(resolveAskWorkspace(file, workspaces)).resolves.toBe(workspaces[1])
+    const stranger = join(root, 'stranger.ts')
+    await writeFile(stranger, '')
+    await expect(resolveAskWorkspace(stranger, workspaces)).rejects.toThrow('outside')
+  })
+
+  it('picks the newest session with a live agent', () => {
+    const live = (id: string) => (id === 'old' || id === 'older' ? { id, followup: () => {} } : undefined)
+    const workspace = { path: '/ws', sessionIds: ['old', 'dead', 'older'] }
+    const newest = pickLiveSession(workspace, live)
+    expect(newest?.id).toBe('older')
+    expect(pickLiveSession({ path: '/ws', sessionIds: ['dead'] }, live)).toBeUndefined()
+    expect(pickLiveSession({ path: '/ws' }, live)).toBeUndefined()
+  })
+
+  it('stages the workbench extension and replaces stale versions', async () => {
+    const source = new URL('../extension/', import.meta.url).pathname
+    const extensionsDir = await mkdtemp(join(tmpdir(), 'dsh-cs-ext-'))
+    const stale = join(extensionsDir, 'immiq.dsh-ask-0.0.1')
+    await mkdir(stale)
+    await writeFile(join(stale, 'old.txt'), '')
+    const target = await installAskExtension(extensionsDir, source)
+    expect(target).toMatch(/immiq\.dsh-ask-/)
+    const { readdir, readFile: read } = await import('node:fs/promises')
+    expect(await readdir(extensionsDir)).toEqual([target.split('/').pop()])
+    const manifest = JSON.parse(await read(join(target, 'package.json'), 'utf8')) as { main: string }
+    expect(manifest.main).toBe('./extension.js')
+    expect(await read(join(target, 'extension.js'), 'utf8')).toContain('dsh.ask')
   })
 })
