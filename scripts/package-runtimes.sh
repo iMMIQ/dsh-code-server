@@ -76,10 +76,15 @@ for target in $targets; do
     "$stage/package/vendor/code-server/bin/code-server"
   rm -f "$stage/package/vendor/code-server/bin/code-server.bak"
   rm -rf "$stage/package/vendor/code-server/lib/node"
+  # npm auto-installed typescript as i18next's optional peer dependency;
+  # nothing in the runtime requires it at runtime. Releases built after the
+  # fork dropped it already pass this rm through as a no-op.
+  rm -rf "$stage/package/vendor/code-server/node_modules/typescript"
   descriptor_for "$target" > "$stage/package/vendor/code-server/dsh-runtime.json"
   test -x "$stage/package/bin/dsh-code-server-runtime"
   test -x "$stage/package/vendor/code-server/bin/code-server"
   test ! -e "$stage/package/vendor/code-server/lib/node"
+  test ! -e "$stage/package/vendor/code-server/node_modules/typescript"
   test -f "$stage/package/vendor/code-server/LICENSE"
   test -f "$stage/package/vendor/code-server/ThirdPartyNotices.txt"
 
