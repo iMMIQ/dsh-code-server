@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { composeFixPrompt, composePrompt } from '../extension/prompt.js'
+import { composeFixPrompt, composePrompt, composeTerminalPrompt } from '../extension/prompt.js'
 
 function fakeDocument(text: string, fsPath = '/ws/a.ts', languageId = 'typescript') {
   return {
@@ -68,5 +68,26 @@ describe('composeFixPrompt (fix)', () => {
     expect(prompt).toContain('- Ln 50 [ts 1]: problem 49')
     expect(prompt).not.toContain('problem 50\n')
     expect(prompt).toContain('(10 more problems not listed)')
+  })
+})
+
+describe('composeTerminalPrompt (explain)', () => {
+  it('fences the selection and names the terminal', () => {
+    const prompt = composeTerminalPrompt('bash', 'ls: cannot access /nope')
+    expect(prompt).toContain('Explain this terminal output from "bash"')
+    expect(prompt).toContain('```\nls: cannot access /nope\n```')
+  })
+
+  it('omits the origin when the terminal has no name', () => {
+    expect(composeTerminalPrompt('', 'boom')).toContain('Explain this terminal output:')
+  })
+
+  it('keeps head and tail halves of oversized captures', () => {
+    const text = `${'h'.repeat(9000)}${'t'.repeat(3000)}END-MARK`
+    const prompt = composeTerminalPrompt('bash', text)
+    expect(prompt).toContain('h'.repeat(6000))
+    expect(prompt).toContain('END-MARK')
+    expect(prompt).toContain('8 characters omitted')
+    expect(prompt.length).toBeLessThan(14_000)
   })
 })

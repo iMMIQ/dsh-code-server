@@ -6,6 +6,8 @@
 const MAX_SELECTION_CHARS = 8000
 /** More diagnostics than this are dropped with a note instead of listed. */
 const MAX_FIX_DIAGNOSTICS = 50
+/** Terminal selections larger than this keep head and tail halves only. */
+const MAX_TERMINAL_CHARS = 12_000
 /** Per-diagnostic truncation, keeping the whole prompt well under the /ask cap. */
 const MAX_FIX_MESSAGE_CHARS = 300
 const MAX_FIX_LINE_CHARS = 200
@@ -65,4 +67,27 @@ function composeFixPrompt(file, languageId, diagnostics) {
   ].join('\n')
 }
 
-module.exports = { composePrompt, composeFixPrompt }
+/**
+ * Compose the terminal-explain prompt. Oversized captures keep the head and
+ * tail halves — command output usually fails at either end, and the /ask body
+ * cap is far below full scrollback.
+ */
+function composeTerminalPrompt(terminalName, text) {
+  const origin = terminalName === undefined || terminalName === ''
+    ? ''
+    : ` from "${terminalName}"`
+  let block = text
+  if (text.length > MAX_TERMINAL_CHARS) {
+    const half = Math.floor(MAX_TERMINAL_CHARS / 2)
+    block = `${text.slice(0, half)}\n… (${String(text.length - MAX_TERMINAL_CHARS)} characters omitted) …\n${text.slice(-half)}`
+  }
+  return [
+    `Explain this terminal output${origin}: what happened, and if it failed, why and how to fix it.`,
+    '',
+    '```',
+    block,
+    '```',
+  ].join('\n')
+}
+
+module.exports = { composePrompt, composeFixPrompt, composeTerminalPrompt }

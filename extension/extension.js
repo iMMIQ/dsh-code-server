@@ -6,7 +6,7 @@
 'use strict'
 
 const vscode = require('vscode')
-const { composePrompt, composeFixPrompt } = require('./prompt')
+const { composePrompt, composeFixPrompt, composeTerminalPrompt } = require('./prompt')
 
 async function deliver(label, prompt, file) {
   const endpoint = process.env.DSH_ASK_ENDPOINT
@@ -133,7 +133,27 @@ function activate(context) {
     { providedCodeActionKinds: [vscode.CodeActionKind.QuickFix] },
   )
 
-  context.subscriptions.push(ask, fixFile, fixAt, provider)
+  // Terminal.selection is a proposed API; this workbench (dsh's vscode fork)
+  // enables proposed APIs for all extensions, and there is no stable
+  // equivalent for reading what the user highlighted in xterm.
+  const explainTerminal = vscode.commands.registerCommand('dsh.explainTerminal', async () => {
+    const terminal = vscode.window.activeTerminal
+    if (terminal === undefined) {
+      vscode.window.showWarningMessage('Explain DSH: focus a terminal first.')
+      return
+    }
+    const selection = terminal.selection
+    if (typeof selection !== 'string' || selection.trim() === '') {
+      vscode.window.showInformationMessage(
+        'Explain DSH: select the terminal output to explain first (right-click → Select All).',
+      )
+      return
+    }
+    const prompt = composeTerminalPrompt(terminal.name, selection)
+    await deliver('Explain DSH', prompt, undefined)
+  })
+
+  context.subscriptions.push(ask, fixFile, fixAt, provider, explainTerminal)
 }
 
 module.exports = { activate }

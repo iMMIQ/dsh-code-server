@@ -3,7 +3,7 @@
   "displayName": "Ask & Fix DSH",
   "description": "Send the active editor's file, selection, or reported problems to the DeepSeek Harness agent session",
   "publisher": "immiq",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "license": "MIT",
   "engines": {
@@ -27,6 +27,10 @@
       {
         "command": "dsh.fixFile",
         "title": "DSH: Fix Problems in This File"
+      },
+      {
+        "command": "dsh.explainTerminal",
+        "title": "DSH: Explain Terminal Selection"
       }
     ],
     "menus": {
@@ -34,6 +38,12 @@
         {
           "command": "dsh.ask",
           "when": "editorTextFocus",
+          "group": "9_dsh@0"
+        }
+      ],
+      "terminal/context": [
+        {
+          "command": "dsh.explainTerminal",
           "group": "9_dsh@0"
         }
       ]
