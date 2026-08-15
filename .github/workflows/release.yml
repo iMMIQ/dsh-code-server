@@ -70,7 +70,7 @@ jobs:
           printf '%s\n' '{"name":"runtime-smoke","private":true}' > runtime-smoke/package.json
           pnpm --dir runtime-smoke add "$PWD/artifacts/dsh-code-server-$package_version-linux-amd64.tgz"
           NODE_EXEC_PATH="$(command -v node)" \
-            runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep '^4.132.0-dsh.3 '
+            runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep '^4.132.0-dsh.4 '
 
       - name: Create GitHub Release
         env:

@@ -1,6 +1,6 @@
 {
   "name": "dsh-code-server",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "description": "Embed a loopback code-server workbench in DeepSeek Harness Web without patching DSH",
   "keywords": [

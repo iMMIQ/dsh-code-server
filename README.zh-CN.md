@@ -31,7 +31,7 @@
 
 ```bash
 dsh plugin --profile web add \
-  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.3/dsh-code-server-0.1.3-linux-amd64.tgz
+  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.4/dsh-code-server-0.1.4-linux-amd64.tgz
 dsh --profile web --dump-config
 dsh --profile web
 ```
