@@ -3,9 +3,9 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 output_dir=${1:?usage: package-runtimes.sh OUTPUT_DIR}
-code_server_version=4.132.0-dsh.2
+code_server_version=4.132.0-dsh.3
 code_server_repo=iMMIQ/code-server
-code_server_commit=239b6cb1df9fde17ff542cc320796fe5c70ac767
+code_server_commit=eb69b00b623c7c90a1e1ccc4a7f1a824902603b9
 package_version=$(node -p "require('$repo_root/package.json').version")
 archive_dir=${CODE_SERVER_ARCHIVE_DIR:-}
 download_dir=
@@ -35,20 +35,20 @@ thin_package="$work_dir/dsh-code-server-$package_version.tgz"
 
 checksum_for() {
   case "$1" in
-    linux-amd64) echo faf3eddc0ec8955dc05273ba047538044c79d6b7462aac28cb2a166f563f8fce ;;
-    linux-arm64) echo 1e28b1ca3e5311686269125c2bc595bd7d5f731947eaadebff24ef0da63f31e5 ;;
-    macos-amd64) echo 88338f99c298726b72bd3722a97b57974d9ecf22df2fed46c70af529cfa77aa4 ;;
-    macos-arm64) echo f0f92df77f0a576dbb1d0280f3988e7b287bcc9707010d166bb8f3711b7957b6 ;;
+    linux-amd64) echo 907025c48c2133d83c1b764073562ea731c6656385bb6167b0f8302ae0c62c6e ;;
+    linux-arm64) echo 3b74cdb3705fbfddec1a2cbbd663f4b747c954fc7449e0034c892d02f20a8ed4 ;;
+    macos-amd64) echo 8a700d08af1a5c3a5d1fff343b6c82e47c83102529fcf76b4c7e0b6ad8e0113d ;;
+    macos-arm64) echo 176733bf9139dd598ab50abca807b92a28c6b10fa8eb4bbdd286ffa6cbbb5661 ;;
     *) return 1 ;;
   esac
 }
 
 descriptor_for() {
   case "$1" in
-    linux-amd64) printf '%s\n' '{"platform":"linux","arch":"x64","version":"4.132.0-dsh.2"}' ;;
-    linux-arm64) printf '%s\n' '{"platform":"linux","arch":"arm64","version":"4.132.0-dsh.2"}' ;;
-    macos-amd64) printf '%s\n' '{"platform":"darwin","arch":"x64","version":"4.132.0-dsh.2"}' ;;
-    macos-arm64) printf '%s\n' '{"platform":"darwin","arch":"arm64","version":"4.132.0-dsh.2"}' ;;
+    linux-amd64) printf '%s\n' '{"platform":"linux","arch":"x64","version":"4.132.0-dsh.3"}' ;;
+    linux-arm64) printf '%s\n' '{"platform":"linux","arch":"arm64","version":"4.132.0-dsh.3"}' ;;
+    macos-amd64) printf '%s\n' '{"platform":"darwin","arch":"x64","version":"4.132.0-dsh.3"}' ;;
+    macos-arm64) printf '%s\n' '{"platform":"darwin","arch":"arm64","version":"4.132.0-dsh.3"}' ;;
     *) return 1 ;;
   esac
 }
