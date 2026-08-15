@@ -101,6 +101,15 @@ export function defaultCodeServerExecutable(runtimeDir = BUNDLED_RUNTIME_DIR): s
 /** Cordis service dependencies used by the host half. */
 export const inject = ['webServer', 'workspaceRegistry']
 
+/**
+ * The bundled runtime ships without lib/node, so run it on the node that is
+ * already hosting DSH. All native modules in the runtime are N-API, which
+ * keeps them loadable across supported node majors.
+ */
+function codeServerEnv(): NodeJS.ProcessEnv {
+  return { ...process.env, NODE_EXEC_PATH: process.execPath }
+}
+
 function resolveConfig(config: Config = {}): ResolvedConfig {
   const dshHome = process.env.DSH_HOME ?? join(homedir(), '.dsh')
   const userDataDir = config.userDataDir ?? join(dshHome, 'code-server', 'user-data')
@@ -254,7 +263,7 @@ class CodeServerSidecar {
       '--disable-update-check',
       ...(initialWorkspace === undefined ? [] : [initialWorkspace]),
     ]
-    const child = spawn(this.config.executable, args, { stdio: ['ignore', 'ignore', 'pipe'] })
+    const child = spawn(this.config.executable, args, { stdio: ['ignore', 'ignore', 'pipe'], env: codeServerEnv() })
     this.child = child
     child.once('error', () => {
       if (this.child === child) this.child = undefined
@@ -305,6 +314,7 @@ class CodeServerSidecar {
     if (this.state.phase !== 'ready') throw new Error('code-server is not ready')
     const child = spawn(this.config.executable, openCodeServerArgs(this.config, request), {
       stdio: ['ignore', 'ignore', 'pipe'],
+      env: codeServerEnv(),
     })
     let stderr = ''
     child.stderr?.setEncoding('utf8')

@@ -69,10 +69,17 @@ for target in $targets; do
   tar -xzf "$thin_package" -C "$stage"
   mkdir -p "$stage/package/vendor/code-server"
   tar -xzf "$archive_path" --strip-components=1 -C "$stage/package/vendor/code-server"
+  # Drop the bundled node binary; DSH runs the runtime on its own node via
+  # NODE_EXEC_PATH. The wrapper sed covers archives built before the
+  # NODE_EXEC_PATH fallback landed in the fork and is a no-op on newer ones.
+  sed -i.bak 's|^exec "$ROOT/lib/node" "$ROOT" "$@"$|exec "${NODE_EXEC_PATH:-$ROOT/lib/node}" "$ROOT" "$@"|' \
+    "$stage/package/vendor/code-server/bin/code-server"
+  rm -f "$stage/package/vendor/code-server/bin/code-server.bak"
+  rm -rf "$stage/package/vendor/code-server/lib/node"
   descriptor_for "$target" > "$stage/package/vendor/code-server/dsh-runtime.json"
   test -x "$stage/package/bin/dsh-code-server-runtime"
   test -x "$stage/package/vendor/code-server/bin/code-server"
-  test -x "$stage/package/vendor/code-server/lib/node"
+  test ! -e "$stage/package/vendor/code-server/lib/node"
   test -f "$stage/package/vendor/code-server/LICENSE"
   test -f "$stage/package/vendor/code-server/ThirdPartyNotices.txt"
 
