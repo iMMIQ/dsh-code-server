@@ -14,6 +14,20 @@ interface AgentLike {
   followup(message: unknown): void
 }
 
+/** Session projection carried by `session/event` broadcasts. */
+interface SessionLike {
+  readonly header: { readonly id: string }
+}
+
+/**
+ * Narrow `session/event` envelope. Only the fields the chat bridge reads are
+ * typed; unknown event types pass through untouched.
+ */
+interface SessionEventLike {
+  readonly type: string
+  readonly data?: unknown
+}
+
 interface HostContext {
   logger: {
     info(message: string): void
@@ -33,17 +47,22 @@ interface HostContext {
   agents: {
     get(id: string): AgentLike | undefined
   }
+  /** Subscribe to DSH session broadcasts; returns the unsubscribe function. */
+  on(event: 'session/event', listener: (session: SessionLike, event: SessionEventLike) => void): () => void
   effect(effect: () => void | (() => void | Promise<void>), label: string): void
 }
 
 const STATUS_PATH = '/dsh-code-server/status'
 const OPEN_PATH = '/dsh-code-server/open'
 const ASK_PATH = '/dsh-code-server/ask'
+const CHAT_PATH = '/dsh-code-server/chat'
 const ASK_TOKEN_HEADER = 'x-dsh-ask-token'
 const MAX_BODY_BYTES = 8 * 1024
 /** Ask bodies embed an editor selection, so they get a larger cap than /open. */
 const MAX_ASK_BODY_BYTES = 64 * 1024
 const MAX_ASK_TEXT_CHARS = 32_000
+/** A chat stream spans a full agent turn (tools included); allow generous room. */
+const CHAT_STREAM_TIMEOUT_MS = 10 * 60_000
 
 export interface Config {
   executable?: string
@@ -309,6 +328,39 @@ export function tokensEqual(expected: string, presented: string | undefined): bo
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
+/**
+ * Turn-capture state machine for the chat stream. `armed` means the followup
+ * has been delivered but its turn has not opened yet; the first `turn/start`
+ * after delivery is the turn our message claimed (a busy session finishes its
+ * current turn first — its tail is ignored because capture only opens on a
+ * turn boundary). `capturing` streams assistant text until the closing
+ * `turn/end`; `done` ignores everything.
+ */
+export type ChatCaptureState = 'armed' | 'capturing' | 'done'
+
+/** What the route should forward to the SSE client after one event. */
+export type ChatCaptureEmission = { kind: 'delta'; text: string } | { kind: 'done' }
+
+export function chatCaptureStep(state: ChatCaptureState, event: SessionEventLike): {
+  state: ChatCaptureState
+  emission: ChatCaptureEmission | undefined
+} {
+  if (state === 'armed' && event.type === 'turn/start') return { state: 'capturing', emission: undefined }
+  if (state === 'capturing') {
+    if (event.type === 'assistant/chunk') {
+      const chunk = (event.data as { chunk?: unknown } | undefined)?.chunk
+      const kind = (chunk as { type?: unknown } | undefined)?.type
+      const text = (chunk as { text?: unknown } | undefined)?.text
+      if (kind === 'text-delta' && typeof text === 'string' && text !== '') {
+        return { state, emission: { kind: 'delta', text } }
+      }
+      return { state, emission: undefined }
+    }
+    if (event.type === 'turn/end') return { state: 'done', emission: { kind: 'done' } }
+  }
+  return { state, emission: undefined }
+}
+
 /** Workspace projection subset used to route an ask to its sessions. */
 export interface AskWorkspaceLike {
   path: string
@@ -528,12 +580,14 @@ export function apply(ctx: HostContext, rawConfig: Config = {}): void {
 
   // The workbench extension posts asks back over loopback; a fresh random
   // token per launch gates the route (node fetch sends no Origin header, so
-  // the /open same-origin check cannot apply to it).
+  // the /open same-origin check cannot apply to it). The chat stream route
+  // shares the token and origin.
   const askToken = randomUUID()
   const askPort = ctx.webServer.port
   const askEndpoint: Record<string, string> = {}
   if (typeof askPort === 'number' && askPort > 0) {
     askEndpoint.DSH_ASK_ENDPOINT = `http://127.0.0.1:${String(askPort)}${ASK_PATH}`
+    askEndpoint.DSH_CHAT_ENDPOINT = `http://127.0.0.1:${String(askPort)}${CHAT_PATH}`
     askEndpoint.DSH_ASK_TOKEN = askToken
   } else {
     ctx.logger.warn(new Error('dsh-code-server: DSH web port unknown; the Ask DSH workbench command will report no endpoint'))
@@ -628,7 +682,91 @@ export function apply(ctx: HostContext, rawConfig: Config = {}): void {
         }
       },
     })
+    // Chat twin of /ask: delivers the same followup but keeps the connection
+    // open and streams the session's next assistant turn back as SSE, so the
+    // workbench chat participant can render a live reply. Resolution and auth
+    // failures are reported as plain JSON before the stream opens.
+    const disposeChat = ctx.webServer.register({
+      kind: 'exact',
+      path: CHAT_PATH,
+      handler: async (req, res) => {
+        const header = req.headers[ASK_TOKEN_HEADER]
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        if (!tokensEqual(askToken, Array.isArray(header) ? header[0] : header)) {
+          sendJson(res, 403, { error: 'valid ask token required' })
+          return
+        }
+        if (!(req.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')) {
+          sendJson(res, 415, { error: 'application/json required' })
+          return
+        }
+        let parsed: AskRequest
+        let agent: AgentLike
+        try {
+          parsed = parseAskRequest(await readJson(req, MAX_ASK_BODY_BYTES))
+          const workspaces = ctx.workspaceRegistry.list()
+          if (workspaces.length === 0) {
+            sendJson(res, 400, { error: 'no registered DSH workspace' })
+            return
+          }
+          const workspace = parsed.file === undefined
+            ? workspaces[0]
+            : await resolveAskWorkspace(parsed.file, workspaces)
+          const resolved = pickLiveSession(workspace, id => ctx.agents.get(id))
+          if (resolved === undefined) {
+            sendJson(res, 409, {
+              error: `no live DSH session for workspace ${workspace.path}; open the session in DSH and retry`,
+            })
+            return
+          }
+          agent = resolved
+        } catch (reason) {
+          sendJson(res, 400, { error: messageOf(reason) })
+          return
+        }
+
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-store',
+        })
+        const send = (value: unknown): void => { res.write(`data: ${JSON.stringify(value)}\n\n`) }
+        let state: ChatCaptureState = 'armed'
+        let closed = false
+        const finish = (): void => {
+          if (closed) return
+          closed = true
+          clearTimeout(deadline)
+          off()
+          res.end()
+        }
+        const deadline = setTimeout(() => {
+          if (!closed) send({ error: 'chat stream timed out' })
+          finish()
+        }, CHAT_STREAM_TIMEOUT_MS)
+        const off = ctx.on('session/event', (session, event) => {
+          if (closed || session.header.id !== agent.id) return
+          const step = chatCaptureStep(state, event)
+          state = step.state
+          if (step.emission === undefined) return
+          if (step.emission.kind === 'delta') send({ delta: step.emission.text })
+          else {
+            send({ done: true })
+            finish()
+          }
+        })
+        req.on('close', () => { finish() })
+        agent.followup(createUserMessage({
+          content: [{ type: 'text', text: parsed.text }],
+          source: { kind: 'user' },
+        }))
+        ctx.logger.info(`dsh-code-server: chat stream opened to session ${agent.id}`)
+      },
+    })
     return async () => {
+      disposeChat()
       disposeAsk()
       disposeOpen()
       disposeStatus()

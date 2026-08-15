@@ -1,9 +1,9 @@
 {
   "name": "dsh-ask",
-  "displayName": "Ask & Fix DSH",
-  "description": "Send the active editor's file, selection, or reported problems to the DeepSeek Harness agent session",
+  "displayName": "Ask, Fix & Chat DSH",
+  "description": "Chat with DSH in the editor, and send files, selections, or reported problems to the DeepSeek Harness agent session",
   "publisher": "immiq",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "license": "MIT",
   "engines": {
@@ -47,6 +47,30 @@
           "group": "9_dsh@0"
         }
       ]
-    }
+    },
+    "chatParticipants": [
+      {
+        "id": "immiq.dsh",
+        "name": "dsh",
+        "description": "Chat with the DeepSeek Harness agent session for this workspace",
+        "isSticky": true,
+        "isDefault": true,
+        "locations": ["panel", "editor", "terminal"],
+        "modes": ["ask", "agent", "edit"],
+        "commands": [
+          {
+            "name": "fix",
+            "description": "fix the problems reported in the active editor"
+          }
+        ]
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "copilot",
+        "displayName": "DSH",
+        "isDefault": true
+      }
+    ]
   }
 }

@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   authorizeOpenPath, authorizeSpillPath, authorizeWorkspacePath,
-  defaultCodeServerExecutable, installAskExtension, openCodeServerArgs,
+  chatCaptureStep, defaultCodeServerExecutable, installAskExtension, openCodeServerArgs,
   parseAskRequest, pickLiveSession, resolveAskWorkspace, tokensEqual,
 } from '../src/index.ts'
 
@@ -173,5 +173,40 @@ describe('ask route helpers', () => {
     const ours = registry.find(row => row.identifier.id === 'immiq.dsh-ask')
     expect(ours?.version).toBe(manifest.version)
     expect(ours?.relativeLocation).toBe(target.split('/').pop())
+  })
+})
+
+describe('chat turn capture', () => {
+  const chunk = (text: string) => ({
+    type: 'assistant/chunk',
+    data: { turn: 1, step: 0, chunk: { type: 'text-delta', index: 0, text } },
+  })
+
+  it('streams only the turn that starts after delivery', () => {
+    let state = 'armed' as ReturnType<typeof chatCaptureStep>['state']
+    // tail of a turn already in flight when the followup landed: ignored
+    let step = chatCaptureStep(state, chunk('stale'))
+    expect(step.emission).toBeUndefined()
+    expect(step.state).toBe('armed')
+    state = step.state
+    step = chatCaptureStep(state, { type: 'turn/start', data: { turn: 2 } })
+    expect(step.state).toBe('capturing')
+    state = step.state
+    step = chatCaptureStep(state, chunk('hello '))
+    expect(step.emission).toEqual({ kind: 'delta', text: 'hello ' })
+    // non-text chunks (reasoning, block boundaries) pass silently
+    step = chatCaptureStep(state, {
+      type: 'assistant/chunk',
+      data: { turn: 2, step: 0, chunk: { type: 'reasoning-delta', index: 0, text: 'thinking' } },
+    })
+    expect(step.emission).toBeUndefined()
+    step = chatCaptureStep(state, chunk('world'))
+    expect(step.emission).toEqual({ kind: 'delta', text: 'world' })
+    state = step.state
+    step = chatCaptureStep(state, { type: 'turn/end', data: { turn: 2, reason: 'done' } })
+    expect(step.emission).toEqual({ kind: 'done' })
+    expect(step.state).toBe('done')
+    // everything after the captured turn is ignored
+    expect(chatCaptureStep('done', chunk('late'))).toEqual({ state: 'done', emission: undefined })
   })
 })

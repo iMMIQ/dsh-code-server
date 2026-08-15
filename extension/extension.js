@@ -1,8 +1,9 @@
-// Ask DSH & Fix DSH — ship the active editor's file, selection, or reported
+// Ask, Fix & Chat DSH — ship the active editor's file, selection, or reported
 // problems to the DeepSeek Harness agent session that owns the enclosing
 // workspace. The endpoint and bearer token arrive through DSH_ASK_ENDPOINT /
-// DSH_ASK_TOKEN, which the dsh-code-server host plugin injects into the
-// code-server process env.
+// DSH_CHAT_ENDPOINT / DSH_ASK_TOKEN, which the dsh-code-server host plugin
+// injects into the code-server process env. The chat participant routes bare
+// messages (no @mention needed) and streams the session's reply back.
 'use strict'
 
 const vscode = require('vscode')
@@ -83,6 +84,115 @@ async function fixDiagnostics(document, diagnostics) {
   await deliver('Fix DSH', prompt, document.uri.fsPath)
 }
 
+/**
+ * POST to the host's /chat route and yield the session's streamed reply.
+ * Each yield is one text delta; the stream ends on {done} or {error}.
+ */
+async function* dshChatStream(prompt, file, token) {
+  const response = await fetch(process.env.DSH_CHAT_ENDPOINT, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-dsh-ask-token': token },
+    body: JSON.stringify({ text: prompt, file }),
+  })
+  if (!response.ok) {
+    let detail = `HTTP ${String(response.status)}`
+    try { detail = (await response.json()).error || detail } catch { /* keep status */ }
+    throw new Error(detail)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) return
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      let payload
+      try { payload = JSON.parse(line.slice(6)) } catch { continue }
+      if (typeof payload.error === 'string') throw new Error(payload.error)
+      if (payload.done === true) return
+      if (typeof payload.delta === 'string' && payload.delta !== '') yield payload.delta
+    }
+  }
+}
+
+/** Register the chat participant as the default agent for chat locations. */
+function registerChatParticipant(context) {
+  // Chat APIs only exist once the workbench ships the restored chat UI; on
+  // older trimmed runtimes they are undefined and the commands above still work.
+  if (vscode.chat === undefined || vscode.lm === undefined) return
+
+  // Agent-mode chat resolves a language model before invoking the participant.
+  // The reply itself never comes from this provider — the participant streams
+  // the DSH session's answer — but resolution must succeed, and the default
+  // model must live under the vendor the workbench hardcodes.
+  try {
+    context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider('copilot', {
+      provideLanguageModelChatInformation: async () => [{
+        vendor: 'copilot',
+        id: 'dsh-session',
+        family: 'dsh-session',
+        version: '1',
+        name: 'DSH agent session',
+        maxInputTokens: 128000,
+        isDefault: true,
+        isUserSelectable: true,
+        capabilities: { toolCalling: true },
+      }],
+    }))
+  } catch { /* without the provider only agent mode is degraded */ }
+
+  const handler = async (request, chatContext, stream, token) => {
+    const endpoint = process.env.DSH_CHAT_ENDPOINT
+    const askToken = process.env.DSH_ASK_TOKEN
+    if (endpoint === undefined || askToken === undefined) {
+      return { errorDetails: { message: 'Chat DSH is unavailable: the dsh-code-server plugin did not provide an endpoint.' } }
+    }
+    const editor = vscode.window.activeTextEditor
+    let prompt
+    let file
+    if (request.command === 'fix') {
+      if (editor === undefined) {
+        return { errorDetails: { message: 'Fix DSH: open a file in the editor first.' } }
+      }
+      const diagnostics = vscode.languages.getDiagnostics(editor.document.uri)
+      if (diagnostics.length === 0) {
+        await stream.markdown('No problems are reported in this file.')
+        return {}
+      }
+      const rows = diagnostics.map(d => toRow(editor.document, d))
+      prompt = composeFixPrompt(editor.document.uri.fsPath, editor.document.languageId, rows)
+      file = editor.document.uri.fsPath
+    } else if (editor !== undefined) {
+      prompt = composePrompt(request.prompt || 'Please review this.', editor.document, editor.selection)
+      file = editor.document.uri.fsPath
+    } else {
+      prompt = request.prompt
+      if (prompt === undefined || prompt.trim() === '') {
+        return { errorDetails: { message: 'Chat DSH: type a question first.' } }
+      }
+    }
+    try {
+      for await (const delta of dshChatStream(prompt, file, askToken)) {
+        if (token.isCancellationRequested) return { errorDetails: { message: 'cancelled' } }
+        await stream.markdown(delta)
+      }
+    } catch (reason) {
+      return { errorDetails: { message: `Chat DSH: ${String(reason && reason.message ? reason.message : reason)}` } }
+    }
+    return {}
+  }
+
+  try {
+    const participant = vscode.chat.createChatParticipant('immiq.dsh', handler)
+    participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'icon.svg')
+    context.subscriptions.push(participant)
+  } catch { /* participant id clash or degraded runtime: commands still work */ }
+}
+
 function activate(context) {
   const ask = vscode.commands.registerCommand('dsh.ask', async () => {
     const editor = vscode.window.activeTextEditor
@@ -154,6 +264,7 @@ function activate(context) {
   })
 
   context.subscriptions.push(ask, fixFile, fixAt, provider, explainTerminal)
+  registerChatParticipant(context)
 }
 
 module.exports = { activate }
