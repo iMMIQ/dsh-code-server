@@ -157,6 +157,7 @@ jobs:
         with:
           name: e2e-artifacts
           path: dsh-code-server/tests/e2e/.artifacts
+          include-hidden-files: true
           if-no-files-found: ignore
 
   release:

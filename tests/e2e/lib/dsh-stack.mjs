@@ -146,6 +146,9 @@ export async function startDshStack({
   })
   if (!up.ok) {
     flushDshLog()
+    // Surface the boot log directly: CI artifact uploads may miss hidden
+    // directories, and this failure mode is otherwise undiagnosable.
+    console.log(`--- dsh boot log (tail) ---\n${dshLog.join('').slice(-4000)}\n--- end dsh boot log ---`)
     throw new Error(`dsh web did not come up; see ${join(outDir, 'dsh.log')}`)
   }
 
