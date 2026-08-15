@@ -3,12 +3,13 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Check out plugin
@@ -36,6 +37,7 @@ jobs:
         working-directory: dsh-code-server
 
       - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
         working-directory: dsh-code-server
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
 
@@ -63,6 +65,13 @@ jobs:
             fi
           done
 
+      - name: Audit e2e sources for secrets and machine-specific paths
+        run: |
+          if grep -rInE '/home/[a-z]|/Users/[a-z]|\.claude|sk-[A-Za-z0-9]{16,}' dsh-code-server/tests/e2e; then
+            echo 'local path, private directory or api-key-shaped secret found in tests/e2e' >&2
+            exit 1
+          fi
+
       - name: Smoke-test Linux x86-64 package
         run: |
           package_version=$(node -p "require('./dsh-code-server/package.json').version")
@@ -72,6 +81,101 @@ jobs:
           NODE_EXEC_PATH="$(command -v node)" \
             runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep '^4.132.0-dsh.4 '
 
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-artifacts
+          path: |
+            artifacts/*
+            !artifacts/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-checksums
+          path: artifacts/SHA256SUMS
+          if-no-files-found: error
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Check out plugin
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: dsh-code-server
+          submodules: true
+
+      - name: Check out compatible DeepSeek Harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: 47f943859bef60e4160492346772ded9b24f765a
+          path: deepseek-harness
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.20.0
+
+      - run: corepack enable
+      - run: corepack prepare pnpm@11.7.0 --activate
+      - run: pnpm install --frozen-lockfile
+        working-directory: dsh-code-server
+      - run: pnpm build
+        working-directory: dsh-code-server
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: dsh-code-server
+
+      - name: Build the harness
+        run: pnpm install --frozen-lockfile && pnpm run build
+        working-directory: deepseek-harness
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-artifacts
+          path: artifacts
+
+      - name: Run the e2e suites
+        env:
+          # The suites talk to a loopback mock LLM only; this placeholder key
+          # never leaves the spawned processes.
+          DEEPSEEK_API_KEY: e2e-mock-not-a-real-key
+        run: |
+          mkdir runtime-e2e
+          tar -xzf artifacts/dsh-code-server-*-linux-amd64.tgz -C runtime-e2e
+          RUNTIME="$PWD/runtime-e2e/package/bin/dsh-code-server-runtime"
+          HARNESS="$PWD/deepseek-harness"
+          node dsh-code-server/tests/e2e/runtime-settings.mjs --runtime "$RUNTIME"
+          node dsh-code-server/tests/e2e/dsh-chat.mjs --runtime "$RUNTIME" --harness "$HARNESS"
+          node dsh-code-server/tests/e2e/dsh-commands.mjs --runtime "$RUNTIME" --harness "$HARNESS"
+
+      - name: Upload e2e artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: e2e-artifacts
+          path: dsh-code-server/tests/e2e/.artifacts
+          if-no-files-found: ignore
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build, e2e]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-artifacts
+          path: artifacts
+      - name: Download checksums
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-checksums
+          path: checksums
+      - name: Assemble release directory
+        run: mv checksums/SHA256SUMS artifacts/SHA256SUMS
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

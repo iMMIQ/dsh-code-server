@@ -15,3 +15,4 @@ vendor/code-server/
 .DS_Store
 .idea/
 .vscode/
+tests/e2e/.artifacts/

@@ -66,7 +66,9 @@
     "build": "tsc -p tsconfig.json && tsdown",
     "test": "vitest run tests",
     "check": "npm run build && npm test",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "test:e2e": "node tests/e2e/runtime-settings.mjs",
+    "test:e2e:dsh": "node tests/e2e/dsh-chat.mjs && node tests/e2e/dsh-commands.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -76,6 +78,7 @@
   "devDependencies": {
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
+    "playwright": "^1.62.1",
     "react": "^18.2.0",
     "tsdown": "^0.22.2",
     "typescript": "^6.0.3",
