@@ -50,7 +50,9 @@ jobs:
           for archive in artifacts/dsh-code-server-*.tgz; do
             test "$(tar -tzf "$archive" | grep -c 'package/vendor/code-server/bin/code-server')" -eq 1
             test "$(tar -tvzf "$archive" package/bin/dsh-code-server-runtime | grep -c '^-rwx')" -eq 1
-            test "$(tar -tvzf "$archive" package/vendor/code-server/lib/node | grep -c '^-rwx')" -eq 1
+            # The runtime ships without the bundled node; it runs on the host's node.
+            test "$(tar -tzf "$archive" | grep -c 'package/vendor/code-server/lib/node')" -eq 0
+            test "$(tar -tzf "$archive" | grep -c 'package/vendor/code-server/node_modules/typescript/')" -eq 0
             if tar -xOf "$archive" \
               package/package.json package/README.md package/README.zh-CN.md \
               package/lib/index.js package/lib/client.js package/lib/client.js.map \
@@ -66,7 +68,8 @@ jobs:
           mkdir runtime-smoke
           printf '%s\n' '{"name":"runtime-smoke","private":true}' > runtime-smoke/package.json
           pnpm --dir runtime-smoke add "$PWD/artifacts/dsh-code-server-$package_version-linux-amd64.tgz"
-          runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep '^4.132.0-dsh.1 '
+          NODE_EXEC_PATH="$(command -v node)" \
+            runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep '^4.132.0-dsh.1 '
 
       - name: Create GitHub Release
         env:
