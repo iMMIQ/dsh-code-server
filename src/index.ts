@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { cp, mkdir, readdir, readFile, realpath, rm, stat } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
@@ -134,7 +134,10 @@ const ASK_EXTENSION_SOURCE = fileURLToPath(new URL('../extension/', import.meta.
 /**
  * Stage the bundled workbench extension into the extensions dir. Any stale
  * version of the same extension id is removed first so an upgrade replaces
- * rather than accumulates. Runs before each sidecar start.
+ * rather than accumulates. The server's `extensions.json` scan registry is
+ * rewritten in the same pass — it is authoritative, so a directory swap alone
+ * would leave the workbench loading the deleted version forever. Runs before
+ * each sidecar start.
  */
 export async function installAskExtension(extensionsDir: string, source = ASK_EXTENSION_SOURCE): Promise<string> {
   const manifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8')) as { version?: unknown }
@@ -147,7 +150,31 @@ export async function installAskExtension(extensionsDir: string, source = ASK_EX
   }
   const target = join(extensionsDir, `${prefix}${manifest.version}`)
   await cp(source, target, { recursive: true })
+  await registerScannedExtension(extensionsDir, manifest.version)
   return target
+}
+
+/** Point the authoritative `extensions.json` at the freshly staged copy. */
+async function registerScannedExtension(extensionsDir: string, version: string): Promise<void> {
+  const registryPath = join(extensionsDir, 'extensions.json')
+  let rows: unknown[] = []
+  try {
+    const parsed = JSON.parse(await readFile(registryPath, 'utf8')) as unknown
+    if (Array.isArray(parsed)) rows = parsed
+  } catch {
+    // Missing or unreadable registry: start a fresh one.
+  }
+  const kept = rows.filter(row => {
+    const id = (row as { identifier?: { id?: unknown } } | null)?.identifier?.id
+    return typeof id !== 'string' || id.toLowerCase() !== ASK_EXTENSION_ID.toLowerCase()
+  })
+  kept.push({
+    identifier: { id: ASK_EXTENSION_ID },
+    version,
+    location: { $mid: 1, path: join(extensionsDir, `${ASK_EXTENSION_ID}-${version}`), scheme: 'file' },
+    relativeLocation: `${ASK_EXTENSION_ID}-${version}`,
+  })
+  await writeFile(registryPath, `${JSON.stringify(kept, undefined, '\t')}\n`)
 }
 
 function resolveConfig(config: Config = {}): ResolvedConfig {

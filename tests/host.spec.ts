@@ -151,12 +151,27 @@ describe('ask route helpers', () => {
     const stale = join(extensionsDir, 'immiq.dsh-ask-0.0.1')
     await mkdir(stale)
     await writeFile(join(stale, 'old.txt'), '')
+    // A stale registry row pointing at the removed dir plus an unrelated entry.
+    await writeFile(join(extensionsDir, 'extensions.json'), JSON.stringify([
+      { identifier: { id: 'immiq.dsh-ask' }, version: '0.0.1', relativeLocation: 'immiq.dsh-ask-0.0.1' },
+      { identifier: { id: 'other.publisher-ext' }, version: '1.0.0', relativeLocation: 'other.publisher-ext-1.0.0' },
+    ]))
     const target = await installAskExtension(extensionsDir, source)
     expect(target).toMatch(/immiq\.dsh-ask-/)
     const { readdir, readFile: read } = await import('node:fs/promises')
-    expect(await readdir(extensionsDir)).toEqual([target.split('/').pop()])
+    const versioned = expect.arrayContaining(['extensions.json', target.split('/').pop()])
+    expect(await readdir(extensionsDir)).toEqual(versioned)
     const manifest = JSON.parse(await read(join(target, 'package.json'), 'utf8')) as { main: string }
     expect(manifest.main).toBe('./extension.js')
     expect(await read(join(target, 'extension.js'), 'utf8')).toContain('dsh.ask')
+    const registry = JSON.parse(await read(join(extensionsDir, 'extensions.json'), 'utf8')) as {
+      identifier: { id: string }
+      version?: string
+      relativeLocation?: string
+    }[]
+    expect(registry.map(row => row.identifier.id)).toEqual(['other.publisher-ext', 'immiq.dsh-ask'])
+    const ours = registry.find(row => row.identifier.id === 'immiq.dsh-ask')
+    expect(ours?.version).toBe(manifest.version)
+    expect(ours?.relativeLocation).toBe(target.split('/').pop())
   })
 })
