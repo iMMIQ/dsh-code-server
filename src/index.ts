@@ -174,9 +174,17 @@ function resolveConfig(config: Config = {}): ResolvedConfig {
   }
 }
 
-/** Arguments shared by the long-running server and one-shot open command. */
+/**
+ * Arguments shared by the long-running server and one-shot open command.
+ * `--disable-workspace-trust` keeps the workbench out of Restricted Mode:
+ * untrusted folders would exclude the builtins that decline untrusted
+ * workspaces (typescript-language-features, terminal-suggest, ...) from the
+ * extension host entirely, leaving the editor without diagnostics. The
+ * workspace is already gated by the user's authenticated DSH session, so the
+ * trust fence adds no security here.
+ */
 export function commonCodeServerArgs(config: Pick<ResolvedConfig, 'userDataDir' | 'extensionsDir'>): string[] {
-  return ['--user-data-dir', config.userDataDir, '--extensions-dir', config.extensionsDir]
+  return ['--user-data-dir', config.userDataDir, '--extensions-dir', config.extensionsDir, '--disable-workspace-trust']
 }
 
 /** Build the one-shot IPC command without going through a shell. */

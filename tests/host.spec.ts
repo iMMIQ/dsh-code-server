@@ -34,6 +34,7 @@ describe('host boundary', () => {
     )).toEqual([
       '--user-data-dir', '/state/user data',
       '--extensions-dir', '/state/extensions',
+      '--disable-workspace-trust',
       '--reuse-window', '/workspace/a file.ts:8:3',
     ])
   })
