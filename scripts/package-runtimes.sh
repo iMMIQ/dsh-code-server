@@ -35,12 +35,13 @@ thin_package="$work_dir/dsh-code-server-$package_version.tgz"
 
 checksum_for() {
   case "$1" in
-    # dsh.5: linux-amd64 built locally from 024c8250; the other three land
-    # with the fork's v4.132.0-dsh.5 release and must be filled in then.
-    linux-amd64) echo 0ac61f5ed89fafc2c71c56a431192858584afa32cb11764e89385302f2a0d964 ;;
-    linux-arm64) echo 330bdc5c48d87fb1ceef7236e3f0779fb3968a6941682998533131d860cfbb2c ;;
-    macos-amd64) echo 35aab59ffec9e4191c268496233ec4892fe82ebad805ab30895850dcaa2c8d71 ;;
-    macos-arm64) echo 734ecde0a90b78c3ebc5a76b9dd036a54ea72e146a6600ea89886bebeffb9d0e ;;
+    # dsh.5: all four from the fork's v4.132.0-dsh.5 release (built by its
+    # CI from 024c8250; local builds are not byte-reproducible, so the
+    # release archives are the source of truth).
+    linux-amd64) echo cd58483a5606479ce7446b9313f352bb05a62ed48f0daf0a25a40b728474fd86 ;;
+    linux-arm64) echo 6894eff09bb017330e7ece0e91d5bc57831f46284b787ca70aaed3118852e9d4 ;;
+    macos-amd64) echo 73715f2141ab88135a402c59e55683346319cb73fe212cc789d93e79453ab84b ;;
+    macos-arm64) echo 67baf6777be91175d602db44afbe821dad7fb07ce205bfc15ae5543568382cf5 ;;
     *) return 1 ;;
   esac
 }
