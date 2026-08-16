@@ -39,6 +39,9 @@ const stack = await startDshStack({
   ports,
   outDir: opts.outDir,
   activationSentinel: `E2EACT-${runId}`,
+  // The chat-view turn must run a real tool first, proving tool calls surface
+  // in the chat stream instead of silence until the closing text.
+  toolCallMarker: new RegExp(CHAT_SENTINEL),
 })
 
 let failed = false
@@ -78,30 +81,47 @@ try {
     const reply = await waitFor(answered, 120_000, 'chat reply')
     await check('mock LLM answered the chat turn', reply.ok, page, opts.outDir, 'b3-chat-reply.png')
 
+    // The turn's opening read of the fixture must surface in the session log
+    // (tool/call + tool/result events) — the mock only replies in text after
+    // the tool result comes back.
+    const turnLog = () => stack.sessionLogText().slice(stack.sessionLogText().lastIndexOf(CHAT_SENTINEL))
+    await check(
+      'chat turn executes a tool call (session log)',
+      (() => { const rest = turnLog(); return rest.includes('"type":"tool/call"') && rest.includes('"name":"read"') && rest.includes('"type":"tool/result"') })(),
+      page,
+      opts.outDir,
+      'b3b-tool-log.png',
+    )
+
     await page.waitForTimeout(3000)
     const widgetText = await page.evaluate(() => {
       const el = document.querySelector('.interactive-session, .chat-view')
       return el ? (el.textContent ?? '') : ''
     })
     await check('chat widget renders the streamed reply', /MOCK-REPLY-\d+/.test(widgetText), page, opts.outDir, 'b4-chat-widget.png')
+    await check(
+      'chat widget renders the tool call row',
+      /⚙\s*read\b/.test(widgetText) && widgetText.includes('broken.ts'),
+      page,
+      opts.outDir,
+      'b4b-tool-row.png',
+    )
     await page.screenshot({ path: `${opts.outDir}/b5-chat-done.png` })
 
     // ---- Ctrl+I inline chat: selection context rides along ----
-    // Once the Chat view has been used, its side bar is part of the saved
-    // workbench layout and Ctrl+I no longer opens the inline widget (dead in
-    // that layout, observed on the official package). Continue in a fresh
-    // page2: same workbench server, pristine layout — like a new browser tab.
-    await page.close()
-    const page2 = await openWorkbench(browser, stack.sidecarUrl, stack.ws)
-    await openEditor(page2, 'broken.ts')
-    await check('editor refocused for inline chat', await focusEditor(page2), page2, opts.outDir, 'b6-focus.png')
-    await page2.keyboard.press('Control+Home')
-    await page2.keyboard.press('ArrowDown')
-    await page2.keyboard.press('Shift+End')
+    // Same page, with the Chat view still open: the inline zone is an
+    // independent surface, and this ordering is the regression guard for the
+    // suspicion that using the Chat view kills Ctrl+I (it did not — that
+    // earlier reading was a placeholder-based selector matching the Chat
+    // view's own input, see workbench.mjs).
+    await check('editor refocused for inline chat', await focusEditor(page), page, opts.outDir, 'b6-focus.png')
+    await page.keyboard.press('Control+Home')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Shift+End')
 
-    const box = await openInlineChat(page2)
-    await check('Ctrl+I inline chat widget opens', box !== null, page2, opts.outDir, 'b7-inline-fail.png')
-    await page2.screenshot({ path: `${opts.outDir}/b8-inline-widget.png` })
+    const box = await openInlineChat(page)
+    await check('Ctrl+I inline chat zone opens (Chat view still open)', box !== null, page, opts.outDir, 'b7-inline-fail.png')
+    await page.screenshot({ path: `${opts.outDir}/b8-inline-widget.png` })
 
     const inlineDelivered = () => {
       const log = stack.sessionLogText()
@@ -109,8 +129,8 @@ try {
       // The selection context must ride along: the fixture's line 2 text.
       return i >= 0 && log.slice(i).includes('nam')
     }
-    const inlineSent = await submitWithRetry(page2, box, `${INLINE_SENTINEL} 解释这一行`, inlineDelivered)
-    await check('inline message (with selection) reaches the session', inlineSent, page2, opts.outDir, 'b9-inline-sent.png')
+    const inlineSent = await submitWithRetry(page, box, `${INLINE_SENTINEL} 解释这一行`, inlineDelivered)
+    await check('inline message (with selection) reaches the session', inlineSent, page, opts.outDir, 'b9-inline-sent.png')
 
     const inlineAnswered = () => {
       const log = stack.sessionLogText()
@@ -118,11 +138,26 @@ try {
       return i >= 0 && /MOCK-REPLY-\d+/.test(log.slice(i)) && log.slice(i).includes('turn/end')
     }
     const inlineReply = await waitFor(inlineAnswered, 120_000, 'inline reply')
-    await check('mock LLM answered the inline turn', inlineReply.ok, page2, opts.outDir, 'b10-inline-reply.png')
-    await page2.waitForTimeout(3000)
-    const inlineText = await page2.evaluate(() => (document.body.textContent ?? '').slice(-4000))
-    await check('inline widget renders the reply', /MOCK-REPLY-\d+/.test(inlineText), page2, opts.outDir, 'b11-inline-widget.png')
-    await page2.screenshot({ path: `${opts.outDir}/b12-inline-done.png` })
+    await check('mock LLM answered the inline turn', inlineReply.ok, page, opts.outDir, 'b10-inline-reply.png')
+    await page.waitForTimeout(2000)
+    // The zone's response tree only shows pending-confirmation responses by
+    // upstream design (inlineChatController's tree filter), so a plain text
+    // reply is not rendered inside the zone. What the user does see: the zone
+    // survives the turn and its input no longer holds the sent text.
+    const zoneState = await page.evaluate(() => {
+      const zone = document.querySelector('.inline-chat-2')
+      if (zone === null) return { alive: false, inputText: '' }
+      const input = zone.querySelector('[role="textbox"]')
+      return { alive: true, inputText: input ? (input.textContent ?? '') : '' }
+    })
+    await check(
+      'inline zone survives the turn and cleared the submitted input',
+      zoneState.alive && !zoneState.inputText.includes(INLINE_SENTINEL),
+      page,
+      opts.outDir,
+      'b11-inline-widget.png',
+    )
+    await page.screenshot({ path: `${opts.outDir}/b12-inline-done.png` })
   } finally {
     await browser.close()
   }

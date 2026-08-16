@@ -339,7 +339,44 @@ export function tokensEqual(expected: string, presented: string | undefined): bo
 export type ChatCaptureState = 'armed' | 'capturing' | 'done'
 
 /** What the route should forward to the SSE client after one event. */
-export type ChatCaptureEmission = { kind: 'delta'; text: string } | { kind: 'done' }
+export type ChatCaptureEmission =
+  | { kind: 'delta'; text: string }
+  | { kind: 'tool'; callId: string; name: string; arguments: string }
+  | { kind: 'toolResult'; callId: string; isError: boolean; summary: string }
+  | { kind: 'done' }
+
+/** Longest single-line tool-result tail forwarded to the chat stream. */
+const CHAT_TOOL_SUMMARY_CHARS = 200
+
+/** Collapse a tool-result text to one bounded line for the chat stream. */
+export function summarizeToolResult(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim()
+  return collapsed.length <= CHAT_TOOL_SUMMARY_CHARS ? collapsed : `${collapsed.slice(0, CHAT_TOOL_SUMMARY_CHARS)}…`
+}
+
+/** Narrow a `tool/result` payload into an emission; undefined when malformed. */
+function toolResultEmission(data: unknown): ChatCaptureEmission | undefined {
+  const row = data as {
+    error?: unknown
+    message?: { source?: { callId?: unknown }; content?: unknown } | null
+  } | null | undefined
+  const callId = row?.message?.source?.callId
+  if (typeof callId !== 'string' || callId === '') return undefined
+  const parts = Array.isArray(row?.message?.content) ? row.message.content : []
+  let isError = row?.error !== undefined
+  let text = ''
+  for (const part of parts) {
+    const typed = part as { type?: unknown; isError?: unknown; content?: unknown }
+    if (typed?.type !== 'tool-result') continue
+    if (typed.isError === true) isError = true
+    const inner = Array.isArray(typed.content) ? typed.content : []
+    for (const item of inner) {
+      const block = item as { type?: unknown; text?: unknown }
+      if (block?.type === 'text' && typeof block.text === 'string' && block.text !== '' && text === '') text = block.text
+    }
+  }
+  return { kind: 'toolResult', callId, isError, summary: summarizeToolResult(text) }
+}
 
 export function chatCaptureStep(state: ChatCaptureState, event: SessionEventLike): {
   state: ChatCaptureState
@@ -355,6 +392,19 @@ export function chatCaptureStep(state: ChatCaptureState, event: SessionEventLike
         return { state, emission: { kind: 'delta', text } }
       }
       return { state, emission: undefined }
+    }
+    // Tool traffic within the captured turn: the agent's tool invocations are
+    // what a long turn spends its time on, so the chat client renders them as
+    // progress rows instead of showing silence until the closing text.
+    if (event.type === 'tool/call') {
+      const data = event.data as { callId?: unknown; name?: unknown; arguments?: unknown } | undefined
+      if (typeof data?.callId === 'string' && typeof data.name === 'string' && typeof data.arguments === 'string') {
+        return { state, emission: { kind: 'tool', callId: data.callId, name: data.name, arguments: data.arguments } }
+      }
+      return { state, emission: undefined }
+    }
+    if (event.type === 'tool/result') {
+      return { state, emission: toolResultEmission(event.data) }
     }
     if (event.type === 'turn/end') return { state: 'done', emission: { kind: 'done' } }
   }
@@ -752,7 +802,17 @@ export function apply(ctx: HostContext, rawConfig: Config = {}): void {
           state = step.state
           if (step.emission === undefined) return
           if (step.emission.kind === 'delta') send({ delta: step.emission.text })
-          else {
+          else if (step.emission.kind === 'tool') {
+            send({ tool: { callId: step.emission.callId, name: step.emission.name, arguments: step.emission.arguments } })
+          } else if (step.emission.kind === 'toolResult') {
+            send({
+              toolResult: {
+                callId: step.emission.callId,
+                isError: step.emission.isError,
+                summary: step.emission.summary,
+              },
+            })
+          } else {
             send({ done: true })
             finish()
           }

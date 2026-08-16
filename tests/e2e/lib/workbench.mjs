@@ -5,8 +5,11 @@
  * - the command palette is `.quick-input-widget input`
  * - the chat view input is a monaco textbox labelled "Chat Input"; clicks on
  *   it need `force: true`
- * - the Ctrl+I inline-chat input is a textbox with placeholder "Describe …";
- *   the widget itself is flaky to open, so retry the keypress
+ * - the Ctrl+I inline-chat zone is the `.inline-chat-2` zone widget (do NOT
+ *   look for its input by placeholder: the chat-input aria-placeholder is
+ *   dropped whenever the placeholder text is empty, so a placeholder-based
+ *   selector silently matches the Chat view's agent-mode input instead — the
+ *   exact mistake that once read as "Ctrl+I dies after using the Chat view")
  * - this monaco build uses the native edit context (no `.inputarea`
  *   textarea); keyboard typing works once the editor holds focus
  * - measure `.monaco-editor.focused .view-lines` — background editors are
@@ -75,11 +78,18 @@ export function chatInput(page) {
   return page.locator('[role="textbox"][aria-label*="Chat Input"]').first()
 }
 
+/** The Ctrl+I inline-chat zone's input textbox, or null while no zone is open. */
+export async function inlineChatInput(page) {
+  const n = await page.locator('.inline-chat-2 [role="textbox"]').count()
+  if (n === 0) return null
+  return page.locator('.inline-chat-2 [role="textbox"]').first()
+}
+
 /**
- * Open the Ctrl+I inline-chat widget, retrying the keypress. The widget is
- * flaky to open on the first press; retries keep the selection intact (a
- * plain editor click would collapse it) and only re-click when the editor
- * actually lost focus.
+ * Open the Ctrl+I inline-chat zone, retrying the keypress. The zone is flaky
+ * to open on the first press; retries keep the selection intact (a plain
+ * editor click would collapse it) and only re-click when the editor actually
+ * lost focus.
  */
 export async function openInlineChat(page, attempts = 6) {
   for (let i = 0; i < attempts; i++) {
@@ -88,10 +98,9 @@ export async function openInlineChat(page, attempts = 6) {
     }
     await page.keyboard.press('Control+I')
     await page.waitForTimeout(3000)
-    const box = page.locator('[role="textbox"][aria-placeholder*="Describe"]').first()
-    const n = await page.locator('[role="textbox"][aria-placeholder*="Describe"]').count()
-    console.log(`[inline] ctrl+i attempt ${String(i + 1)}: describe-box=${String(n)}`)
-    if (n > 0) return box
+    const box = await inlineChatInput(page)
+    console.log(`[inline] ctrl+i attempt ${String(i + 1)}: zone=${String(box === null ? 0 : 1)}`)
+    if (box !== null) return box
     await page.keyboard.press('Escape').catch(() => {})
   }
   return null
@@ -103,6 +112,9 @@ export async function openInlineChat(page, attempts = 6) {
  */
 export async function submitWithRetry(page, box, text, delivered, attempts = 8) {
   await box.click({ timeout: 5000, force: true })
+  // The inline zone can prefill ("Fix the attached problem" when the selection
+  // intersects a squiggle); select-all so the sentinel replaces it.
+  await page.keyboard.press('Control+A').catch(() => {})
   await page.keyboard.type(text)
   await page.waitForTimeout(1200)
   for (let i = 0; i < attempts; i++) {

@@ -10,7 +10,7 @@ runtime that passed every existing check.
 | Script | Needs | Guards |
 | --- | --- | --- |
 | `runtime-settings.mjs` | runtime only | settings.json write/read round-trip (`User/`, never `Machine/`), workspace trust off, TS diagnostics alive |
-| `dsh-chat.mjs` | runtime + harness | Chat view + Ctrl+I inline chat: sentinel reaches the session, mock reply streams back into the widget, extension auto-install |
+| `dsh-chat.mjs` | runtime + harness | Chat view + Ctrl+I inline chat: sentinel reaches the session, mock reply streams back into the widget, the turn's tool call renders as a row (`⚙ read broken.ts`), extension auto-install |
 | `dsh-commands.mjs` | runtime + harness | `DSH: Ask` (selection context) and `DSH: Fix` (all five fixture diagnostics) reach the session and the conversation model |
 
 All three run against a **mock LLM** (OpenAI-compatible SSE, loopback only) —
@@ -53,6 +53,11 @@ Release workflow before a GitHub Release is published.
 - The workspace and its live session are created through the public HTTP API
   (`workspace.create` → `session.create` → `workspace.insertSessionBefore` →
   `session.prompt`); no first-run UI automation is involved.
+- The chat-view turn in `dsh-chat.mjs` starts with a real tool call: the mock
+  LLM replies with an OpenAI `tool_calls` frame for `read broken.ts` and only
+  answers in text on the follow-up request (after the tool result). This
+  exercises the chat stream's tool forwarding (`tool`/`toolResult` SSE frames
+  and the `⚙` rows the extension renders) end to end.
 - Wait for `/dsh-code-server/status` **by body** (`phase === "ready"`): the
   web app answers unknown paths with a 200 SPA fallback, so a bare 200 does
   not prove the plugin is up.
@@ -60,7 +65,18 @@ Release workflow before a GitHub Release is published.
   textarea; type on the keyboard once the editor owns focus.
 - Measure `.monaco-editor.focused .view-lines` for font size: background
   editors are always present at the default size.
-- The Ctrl+I widget and the quick-input Enter submit are flaky on the first
+- Target the Ctrl+I zone by its container (`.inline-chat-2`), never by the
+  input's placeholder: the chat-input `aria-placeholder` attribute is dropped
+  when the placeholder text is empty, and the default layout opens the Chat
+  view whose agent-mode input ("Describe what to build") matches any
+  placeholder-based selector. That mismatch once read as "Ctrl+I dies after
+  using the Chat view" — the zone opens fine; the selector was measuring the
+  Chat view's input.
+- The inline zone's response tree shows only pending-confirmation responses
+  (upstream `inlineChatController` tree filter), so plain text replies are not
+  rendered inside the zone — assert delivery and turn completion in the
+  session log instead.
+- The Ctrl+I keypress and the quick-input Enter submit are flaky on the first
   attempt; the helpers retry both and the retry loops are load-bearing.
 - Everything user-specific is a flag or env var. The suite must never embed
   absolute local paths, API keys or session ids — CI audits for this.

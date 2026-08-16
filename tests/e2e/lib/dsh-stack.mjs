@@ -74,6 +74,7 @@ export async function startDshStack({
   ports,
   outDir,
   activationSentinel,
+  toolCallMarker,
 }) {
   const home = join(baseDir, 'dsh-home')
   const ws = join(baseDir, 'ws')
@@ -104,7 +105,16 @@ export async function startDshStack({
     `- id: dsh-code-server\n  config:\n    executable: ${runtimeBin}\n    host: 127.0.0.1\n    port: ${String(ports.sidecar)}\n    startupTimeoutMs: 60000\n`,
   )
 
-  const llm = await startMockLlm({ port: ports.llm, logFile: join(baseDir, 'llm-requests.jsonl') })
+  const llm = await startMockLlm({
+    port: ports.llm,
+    logFile: join(baseDir, 'llm-requests.jsonl'),
+    // When a test passes a marker, the turn carrying it starts with a real
+    // `read` tool call on the fixture, so the chat stream's tool rows are
+    // exercised end to end.
+    ...(toolCallMarker === undefined ? {} : {
+      toolCall: { match: toolCallMarker, name: 'read', arguments: { file_path: 'broken.ts' } },
+    }),
+  })
 
   const cli = join(harnessDir, 'apps', 'cli', 'lib', 'bin.js')
   const env = { ...process.env, DSH_HOME: home, DEEPSEEK_API_KEY: fakeApiKey }

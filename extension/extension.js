@@ -85,8 +85,10 @@ async function fixDiagnostics(document, diagnostics) {
 }
 
 /**
- * POST to the host's /chat route and yield the session's streamed reply.
- * Each yield is one text delta; the stream ends on {done} or {error}.
+ * POST to the host's /chat route and yield the session's streamed events:
+ * {type:'delta',text} assistant text pieces, {type:'tool',callId,name,arguments}
+ * tool invocations the agent made mid-turn, {type:'toolResult',callId,isError,summary}
+ * their outcomes. The stream ends on {done} or {error}.
  */
 async function* dshChatStream(prompt, file, token) {
   const response = await fetch(process.env.DSH_CHAT_ENDPOINT, {
@@ -114,9 +116,44 @@ async function* dshChatStream(prompt, file, token) {
       try { payload = JSON.parse(line.slice(6)) } catch { continue }
       if (typeof payload.error === 'string') throw new Error(payload.error)
       if (payload.done === true) return
-      if (typeof payload.delta === 'string' && payload.delta !== '') yield payload.delta
+      if (payload.tool !== undefined
+        && typeof payload.tool.callId === 'string'
+        && typeof payload.tool.name === 'string'
+        && typeof payload.tool.arguments === 'string') {
+        yield { type: 'tool', callId: payload.tool.callId, name: payload.tool.name, arguments: payload.tool.arguments }
+      } else if (payload.toolResult !== undefined && typeof payload.toolResult.callId === 'string') {
+        yield {
+          type: 'toolResult',
+          callId: payload.toolResult.callId,
+          isError: payload.toolResult.isError === true,
+          summary: typeof payload.toolResult.summary === 'string' ? payload.toolResult.summary : '',
+        }
+      } else if (typeof payload.delta === 'string' && payload.delta !== '') {
+        yield { type: 'delta', text: payload.delta }
+      }
     }
   }
+}
+
+/** Single-line, bounded, backtick-safe inline-code argument for chat markdown. */
+function inlineCode(value) {
+  const collapsed = String(value).replace(/\s+/g, ' ').trim()
+  const bounded = collapsed.length <= 160 ? collapsed : `${collapsed.slice(0, 160)}…`
+  return `\`${bounded.replace(/`/g, "'")}\``
+}
+
+/** Pick the headline argument of a tool call: the file/command it acts on. */
+function toolHeadline(rawArguments) {
+  let display = rawArguments
+  try {
+    const parsed = JSON.parse(rawArguments)
+    if (parsed !== null && typeof parsed === 'object') {
+      const preferred = ['file_path', 'path', 'cmd', 'command', 'script', 'pattern', 'query', 'url']
+      const key = preferred.find(k => typeof parsed[k] === 'string' && parsed[k] !== '')
+      display = key !== undefined ? parsed[key] : JSON.stringify(parsed)
+    }
+  } catch { /* arguments are the model's raw, possibly unparsable JSON; show as-is */ }
+  return display
 }
 
 /** Register the chat participant as the default agent for chat locations. */
@@ -176,9 +213,21 @@ function registerChatParticipant(context) {
       }
     }
     try {
-      for await (const delta of dshChatStream(prompt, file, askToken)) {
+      // Tool calls render as one compact row each (name + headline argument);
+      // results stay silent unless they failed, so a long agent turn reads as
+      // progress instead of silence followed by the closing text.
+      const toolNames = new Map()
+      for await (const part of dshChatStream(prompt, file, askToken)) {
         if (token.isCancellationRequested) return { errorDetails: { message: 'cancelled' } }
-        await stream.markdown(delta)
+        if (part.type === 'delta') {
+          await stream.markdown(part.text)
+        } else if (part.type === 'tool') {
+          toolNames.set(part.callId, part.name)
+          await stream.markdown(`\n\n⚙ ${inlineCode(part.name)} ${inlineCode(toolHeadline(part.arguments))}\n\n`)
+        } else if (part.isError) {
+          const name = toolNames.get(part.callId) ?? 'tool'
+          await stream.markdown(`\n\n> ⚠ ${inlineCode(name)} failed: ${part.summary}\n\n`)
+        }
       }
     } catch (reason) {
       return { errorDetails: { message: `Chat DSH: ${String(reason && reason.message ? reason.message : reason)}` } }

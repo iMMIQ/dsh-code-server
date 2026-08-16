@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   authorizeOpenPath, authorizeSpillPath, authorizeWorkspacePath,
   chatCaptureStep, defaultCodeServerExecutable, installAskExtension, openCodeServerArgs,
-  parseAskRequest, pickLiveSession, resolveAskWorkspace, tokensEqual,
+  parseAskRequest, pickLiveSession, resolveAskWorkspace, summarizeToolResult, tokensEqual,
 } from '../src/index.ts'
 
 describe('host boundary', () => {
@@ -208,5 +208,102 @@ describe('chat turn capture', () => {
     expect(step.state).toBe('done')
     // everything after the captured turn is ignored
     expect(chatCaptureStep('done', chunk('late'))).toEqual({ state: 'done', emission: undefined })
+  })
+
+  it('forwards tool calls and results of the captured turn', () => {
+    let state = 'armed' as ReturnType<typeof chatCaptureStep>['state']
+    state = chatCaptureStep(state, { type: 'turn/start', data: { turn: 4 } }).state
+    // tool invocation: raw model arguments forwarded verbatim
+    let step = chatCaptureStep(state, {
+      type: 'tool/call',
+      data: { turn: 4, step: 0, callId: 'call_00_x', name: 'read', arguments: '{"file_path": "broken.ts"}' },
+    })
+    expect(step.state).toBe('capturing')
+    expect(step.emission).toEqual({
+      kind: 'tool',
+      callId: 'call_00_x',
+      name: 'read',
+      arguments: '{"file_path": "broken.ts"}',
+    })
+    // result: first text collapsed to one bounded line, success stays silent-flagged
+    step = chatCaptureStep(step.state, {
+      type: 'tool/result',
+      data: {
+        turn: 4,
+        step: 0,
+        message: {
+          source: { kind: 'tool', callId: 'call_00_x' },
+          content: [{
+            type: 'tool-result',
+            toolCallId: 'call_00_x',
+            content: [{ type: 'text', text: '<path>broken.ts</path>\n<content>\nline 1\nline 2\n' }],
+            isError: false,
+          }],
+        },
+      },
+    })
+    expect(step.emission).toEqual({
+      kind: 'toolResult',
+      callId: 'call_00_x',
+      isError: false,
+      summary: '<path>broken.ts</path> <content> line 1 line 2',
+    })
+    // a failed result is flagged whether the error is in the content or the envelope
+    step = chatCaptureStep(step.state, {
+      type: 'tool/result',
+      data: {
+        turn: 4,
+        step: 0,
+        message: {
+          source: { kind: 'tool', callId: 'call_01_y' },
+          content: [{
+            type: 'tool-result',
+            toolCallId: 'call_01_y',
+            content: [{ type: 'text', text: 'boom' }],
+            isError: true,
+          }],
+        },
+      },
+    })
+    expect(step.emission).toMatchObject({ kind: 'toolResult', callId: 'call_01_y', isError: true, summary: 'boom' })
+    step = chatCaptureStep(step.state, {
+      type: 'tool/result',
+      data: {
+        turn: 4,
+        step: 0,
+        error: { name: 'ToolError', code: 'EIO' },
+        message: { source: { kind: 'tool', callId: 'call_02_z' }, content: [] },
+      },
+    })
+    expect(step.emission).toMatchObject({ kind: 'toolResult', callId: 'call_02_z', isError: true, summary: '' })
+    // the turn keeps streaming after tools and still closes on turn/end
+    step = chatCaptureStep(step.state, chunk('after tools'))
+    expect(step.emission).toEqual({ kind: 'delta', text: 'after tools' })
+    step = chatCaptureStep(step.state, { type: 'turn/end', data: { turn: 4, reason: { kind: 'completed' } } })
+    expect(step.emission).toEqual({ kind: 'done' })
+  })
+
+  it('ignores malformed tool events without leaving the capturing state', () => {
+    let state = 'armed' as ReturnType<typeof chatCaptureStep>['state']
+    state = chatCaptureStep(state, { type: 'turn/start', data: { turn: 5 } }).state
+    for (const bad of [
+      { type: 'tool/call', data: { turn: 5, step: 0, name: 'read' } }, // no callId/arguments
+      { type: 'tool/call', data: { turn: 5, step: 0, callId: 7, name: 'read', arguments: '{}' } },
+      { type: 'tool/result', data: { turn: 5, step: 0, message: { source: {}, content: [] } } }, // no callId
+      { type: 'tool/result', data: undefined },
+    ]) {
+      const step = chatCaptureStep(state, bad)
+      expect(step.emission).toBeUndefined()
+      expect(step.state).toBe('capturing')
+    }
+  })
+
+  it('bounds the tool-result summary to one line', () => {
+    expect(summarizeToolResult('a\n\n   b\t\tc')).toBe('a b c')
+    const long = 'x'.repeat(500)
+    const bounded = summarizeToolResult(long)
+    expect(bounded.length).toBe(201)
+    expect(bounded.endsWith('…')).toBe(true)
+    expect(bounded.slice(0, 200)).toBe(long.slice(0, 200))
   })
 })
