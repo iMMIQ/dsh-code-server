@@ -106,7 +106,7 @@ export class DrawerController {
       const response = await fetch(OPEN_PATH, {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ path, line: 1, column: 1 }),
+        body: JSON.stringify(openTarget(path)),
       })
       const body = await response.json() as { error?: unknown }
       if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : `open failed (${String(response.status)})`)
@@ -119,6 +119,25 @@ export class DrawerController {
 
 export interface OpenPathPort {
   openPath(path: string): Promise<void>
+}
+
+/**
+ * Split an open target into path + 1-based line/column. Callers hand over
+ * bare paths; a trailing `:line` or `:line:col` suffix is honoured when
+ * present, so a caller that knows the referenced line can land on it.
+ */
+export function openTarget(path: string): { path: string; line: number; column: number } {
+  // Two anchored shapes, longest first: a greedy single-pass pattern would
+  // swallow the line segment of a `path:line:col` target.
+  const withColumn = /^(.+):(\d+):(\d+)$/.exec(path)
+  if (withColumn !== null) {
+    return { path: withColumn[1]!, line: Number.parseInt(withColumn[2]!, 10), column: Number.parseInt(withColumn[3]!, 10) }
+  }
+  const withLine = /^(.+):(\d+)$/.exec(path)
+  if (withLine !== null) {
+    return { path: withLine[1]!, line: Number.parseInt(withLine[2]!, 10), column: 1 }
+  }
+  return { path, line: 1, column: 1 }
 }
 
 /**

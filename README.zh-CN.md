@@ -12,10 +12,10 @@ DeepSeek Harness（DSH）插件：为 DSH Web 装上完整 VS Code 工作台，�
   可用；工作台显示在右侧抽屉里，可停靠在对话旁，也可切换为浮层。
 - **文件引用点击即开。** 对话中工具调用展示的文件路径，点击就在运行中的工作台
   打开。
-- **原生 Chat 视图，直连 DSH 会话。** 回复边生成边流式上屏；工具调用渲染成
-  `⚙ read src/index.ts` 行，失败会单独标出。
-- **行内聊天（Ctrl+I）。** 选中代码按 Ctrl+I 提问，选区随问题一起发送；这轮
-  对话和回复都会出现在 DSH 对话流里。
+- **原生 Chat 视图，直连 DSH 会话。** 回复边生成边流式上屏；每个工具调用留下
+  `✓ read src/index.ts · 12ms` 结果行并带可点击的文件 chip，失败会单独标出。
+- **行内聊天（Ctrl+I）。** 选中代码按 Ctrl+I 提问，选区随问题一起发送，回答
+  直接流进行内浮层，这轮对话也会落在 DSH 对话流里。
 - **编辑器命令。** `DSH: Ask About This Selection`（也在编辑器右键菜单）、
   `DSH: Fix Problems in This File`、`DSH: Explain Terminal Selection`，以及任意
   诊断上提供的 `Fix with DSH` 快速修复。
@@ -64,7 +64,8 @@ dsh plugin --profile web remove dsh-code-server
 - Chat 视图在工作台的副侧边栏（也可用命令面板的 *Chat: Focus on Chat View*
   打开）。输入问题，工作区的 DSH 会话流式作答。该工作区需要已有活跃会话——
   先在 DSH 里打开，否则会得到明确的报错。
-- 选中代码按 Ctrl+I 行内提问：选区随问题一起发送，回复落在 DSH 对话流里。
+- 选中代码按 Ctrl+I 行内提问：选区随问题一起发送，回答直接流进编辑器里的
+  浮层，这轮对话同时记录在 DSH 对话流里。
 - 右键选区用 `DSH: Ask About This Selection`；带诊断的文件用
   `DSH: Fix Problems in This File`；光标停在问题上时，从灯泡菜单或问题面板
   取 `Fix with DSH` 快速修复；在终端里选中输出后运行

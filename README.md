@@ -15,11 +15,11 @@ Current release: **v0.1.4** · VS Code `1.132.0` · Linux & macOS (amd64 / arm64
 - **File references open in the editor.** Click a file path shown by a
   conversation tool call and it opens in the running workbench.
 - **A native Chat view connected to your DSH session.** Replies stream in as
-  they are generated; tool calls render as `⚙ read src/index.ts` rows, with
-  failures called out separately.
+  they are generated; each tool call leaves a `✓ read src/index.ts · 12ms`
+  row with a clickable file chip, and failures are called out separately.
 - **Inline chat (Ctrl+I).** Select code, press Ctrl+I and ask — the selection
-  travels with the question; the turn and its reply appear in the DSH
-  conversation.
+  travels with the question, the answer streams into the inline zone, and the
+  turn also lands in the DSH conversation.
 - **Editor commands.** `DSH: Ask About This Selection` (also in the editor
   context menu), `DSH: Fix Problems in This File`, `DSH: Explain Terminal
   Selection`, and a `Fix with DSH` quick-fix offered on any diagnostic.
@@ -77,7 +77,8 @@ dsh plugin --profile web remove dsh-code-server
   needs an active session — start one in DSH first; otherwise you get a clear
   error.
 - Select code and press Ctrl+I for inline chat: the selection is sent along
-  with the question, and the reply lands in the DSH conversation.
+  with the question, the answer streams into the zone right in the editor,
+  and the turn is recorded in the DSH conversation.
 - Right-click a selection for `DSH: Ask About This Selection`. Use
   `DSH: Fix Problems in This File` on a file with diagnostics, take the
   `Fix with DSH` quick-fix from the lightbulb or the Problems panel, or

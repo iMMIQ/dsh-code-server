@@ -1,5 +1,23 @@
 import { describe, expect, it, vi } from 'vitest'
-import { installOpenPathAdapter, type OpenPathPort } from '../src/client/controller.ts'
+import { installOpenPathAdapter, openTarget, type OpenPathPort } from '../src/client/controller.ts'
+
+describe('open target parsing', () => {
+  it('passes a bare path through with line and column 1', () => {
+    expect(openTarget('ws/src/index.ts')).toEqual({ path: 'ws/src/index.ts', line: 1, column: 1 })
+  })
+
+  it('splits a path:line suffix', () => {
+    expect(openTarget('ws/src/index.ts:42')).toEqual({ path: 'ws/src/index.ts', line: 42, column: 1 })
+  })
+
+  it('splits a path:line:col suffix', () => {
+    expect(openTarget('ws/src/index.ts:42:7')).toEqual({ path: 'ws/src/index.ts', line: 42, column: 7 })
+  })
+
+  it('keeps a path whose trailing segment is not numeric', () => {
+    expect(openTarget('ws/v1.2:final')).toEqual({ path: 'ws/v1.2:final', line: 1, column: 1 })
+  })
+})
 
 describe('DSH openPath compatibility adapter', () => {
   it('intercepts and restores an inherited method without leaving an own property', async () => {

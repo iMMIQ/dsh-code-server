@@ -156,6 +156,34 @@ function toolHeadline(rawArguments) {
   return display
 }
 
+/** File argument of a tool call, when it has one — becomes a clickable anchor. */
+function toolPath(rawArguments) {
+  try {
+    const parsed = JSON.parse(rawArguments)
+    if (parsed !== null && typeof parsed === 'object') {
+      const preferred = ['file_path', 'path']
+      const key = preferred.find(k => typeof parsed[k] === 'string' && parsed[k] !== '')
+      const line = typeof parsed.line === 'number' ? parsed.line : (typeof parsed.start_line === 'number' ? parsed.start_line : undefined)
+      return { value: key === undefined ? undefined : parsed[key], line }
+    }
+  } catch { /* not JSON: no file anchor */ }
+  return { value: undefined, line: undefined }
+}
+
+/** Resolve a tool's file argument against the workspace for an anchor chip. */
+function toolAnchor(path) {
+  if (path === undefined || path.value === undefined) return undefined
+  if (vscode.workspace.workspaceFolders === undefined || vscode.workspace.workspaceFolders.length === 0) return undefined
+  try {
+    const uri = path.value.startsWith('/')
+      ? vscode.Uri.file(path.value)
+      : vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, path.value)
+    const line = typeof path.line === 'number' && path.line >= 1 ? path.line - 1 : 0
+    return new vscode.Location(uri, new vscode.Position(line, 0))
+  } catch { /* unusable path: skip the anchor */ }
+  return undefined
+}
+
 /** Register the chat participant as the default agent for chat locations. */
 function registerChatParticipant(context) {
   // Chat APIs only exist once the workbench ships the restored chat UI; on
@@ -213,20 +241,33 @@ function registerChatParticipant(context) {
       }
     }
     try {
-      // Tool calls render as one compact row each (name + headline argument);
-      // results stay silent unless they failed, so a long agent turn reads as
-      // progress instead of silence followed by the closing text.
-      const toolNames = new Map()
+      // Tool calls render in two stages: a transient spinner row while the
+      // tool runs (progress parts hide once later content arrives), then a
+      // durable result row with the elapsed time once the outcome lands.
+      const tools = new Map()
       for await (const part of dshChatStream(prompt, file, askToken)) {
         if (token.isCancellationRequested) return { errorDetails: { message: 'cancelled' } }
         if (part.type === 'delta') {
           await stream.markdown(part.text)
         } else if (part.type === 'tool') {
-          toolNames.set(part.callId, part.name)
-          await stream.markdown(`\n\n⚙ ${inlineCode(part.name)} ${inlineCode(toolHeadline(part.arguments))}\n\n`)
-        } else if (part.isError) {
-          const name = toolNames.get(part.callId) ?? 'tool'
-          await stream.markdown(`\n\n> ⚠ ${inlineCode(name)} failed: ${part.summary}\n\n`)
+          tools.set(part.callId, {
+            name: part.name,
+            headline: toolHeadline(part.arguments),
+            path: toolPath(part.arguments),
+            startedAt: Date.now(),
+          })
+          stream.progress(`⚙ ${part.name} ${toolHeadline(part.arguments)}`)
+        } else if (part.type === 'toolResult') {
+          const tool = tools.get(part.callId)
+            ?? { name: 'tool', headline: '', path: undefined, startedAt: Date.now() }
+          const elapsed = `${String(Date.now() - tool.startedAt)}ms`
+          if (part.isError) {
+            await stream.markdown(`\n\n> ⚠ ${inlineCode(tool.name)} failed after ${elapsed}: ${part.summary}\n\n`)
+          } else {
+            await stream.markdown(`\n\n✓ ${inlineCode(tool.name)} ${inlineCode(tool.headline)} · ${elapsed}\n\n`)
+            const anchor = toolAnchor(tool.path)
+            if (anchor !== undefined) stream.anchor(anchor, tool.path.value)
+          }
         }
       }
     } catch (reason) {
