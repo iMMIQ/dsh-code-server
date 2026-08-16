@@ -74,7 +74,7 @@
     "node": "^22.19.0 || >=24.0.0"
   },
   "packageManager": "pnpm@11.7.0",
-  "license": "MIT",
+  "license": "LGPL-3.0",
   "devDependencies": {
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",

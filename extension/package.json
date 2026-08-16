@@ -5,7 +5,7 @@
   "publisher": "immiq",
   "version": "0.1.6",
   "private": true,
-  "license": "MIT",
+  "license": "LGPL-3.0",
   "engines": {
     "vscode": "^1.132.0"
   },
