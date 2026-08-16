@@ -3,9 +3,9 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 output_dir=${1:?usage: package-runtimes.sh OUTPUT_DIR}
-code_server_version=4.132.0-dsh.4
+code_server_version=4.132.0-dsh.5
 code_server_repo=iMMIQ/code-server
-code_server_commit=3c291f26f4cd3d74678b50ee65081ad2258e16dc
+code_server_commit=024c825037fda0f687b0247f1dd915fa88c8c1eb
 package_version=$(node -p "require('$repo_root/package.json').version")
 archive_dir=${CODE_SERVER_ARCHIVE_DIR:-}
 download_dir=
@@ -35,7 +35,9 @@ thin_package="$work_dir/dsh-code-server-$package_version.tgz"
 
 checksum_for() {
   case "$1" in
-    linux-amd64) echo 3a75e09dc9572d8e8505a5c2e6da6bde2b002174fd8bf325cd6594f97f98fb4f ;;
+    # dsh.5: linux-amd64 built locally from 024c8250; the other three land
+    # with the fork's v4.132.0-dsh.5 release and must be filled in then.
+    linux-amd64) echo 0ac61f5ed89fafc2c71c56a431192858584afa32cb11764e89385302f2a0d964 ;;
     linux-arm64) echo 330bdc5c48d87fb1ceef7236e3f0779fb3968a6941682998533131d860cfbb2c ;;
     macos-amd64) echo 35aab59ffec9e4191c268496233ec4892fe82ebad805ab30895850dcaa2c8d71 ;;
     macos-arm64) echo 734ecde0a90b78c3ebc5a76b9dd036a54ea72e146a6600ea89886bebeffb9d0e ;;
@@ -45,10 +47,10 @@ checksum_for() {
 
 descriptor_for() {
   case "$1" in
-    linux-amd64) printf '%s\n' '{"platform":"linux","arch":"x64","version":"4.132.0-dsh.4"}' ;;
-    linux-arm64) printf '%s\n' '{"platform":"linux","arch":"arm64","version":"4.132.0-dsh.4"}' ;;
-    macos-amd64) printf '%s\n' '{"platform":"darwin","arch":"x64","version":"4.132.0-dsh.4"}' ;;
-    macos-arm64) printf '%s\n' '{"platform":"darwin","arch":"arm64","version":"4.132.0-dsh.4"}' ;;
+    linux-amd64) printf '%s\n' '{"platform":"linux","arch":"x64","version":"4.132.0-dsh.5"}' ;;
+    linux-arm64) printf '%s\n' '{"platform":"linux","arch":"arm64","version":"4.132.0-dsh.5"}' ;;
+    macos-amd64) printf '%s\n' '{"platform":"darwin","arch":"x64","version":"4.132.0-dsh.5"}' ;;
+    macos-arm64) printf '%s\n' '{"platform":"darwin","arch":"arm64","version":"4.132.0-dsh.5"}' ;;
     *) return 1 ;;
   esac
 }

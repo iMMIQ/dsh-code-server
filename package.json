@@ -50,7 +50,7 @@
     "README.zh-CN.md"
   ],
   "dsh": {
-    "bundledCodeServerVersion": "4.132.0-dsh.1",
+    "bundledCodeServerVersion": "4.132.0-dsh.5",
     "bundle": {
       "patch": "./cordis.patch.yml"
     },

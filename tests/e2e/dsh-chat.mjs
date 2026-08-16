@@ -100,12 +100,15 @@ try {
     })
     await check('chat widget renders the streamed reply', /MOCK-REPLY-\d+/.test(widgetText), page, opts.outDir, 'b4-chat-widget.png')
     await check(
-      'chat widget renders the tool call row',
-      /⚙\s*read\b/.test(widgetText) && widgetText.includes('broken.ts'),
+      'chat widget renders the durable tool result row',
+      /✓\s*read\b/.test(widgetText) && widgetText.includes('broken.ts') && /·\s*\d+ms/.test(widgetText),
       page,
       opts.outDir,
       'b4b-tool-row.png',
     )
+    // The file argument of the tool row is a clickable anchor chip.
+    const anchors = await page.evaluate(() => document.querySelectorAll('.chat-inline-anchor-widget').length)
+    await check('tool result row carries a clickable file chip', anchors > 0, page, opts.outDir, 'b4c-anchor.png')
     await page.screenshot({ path: `${opts.outDir}/b5-chat-done.png` })
 
     // ---- Ctrl+I inline chat: selection context rides along ----
@@ -140,22 +143,28 @@ try {
     const inlineReply = await waitFor(inlineAnswered, 120_000, 'inline reply')
     await check('mock LLM answered the inline turn', inlineReply.ok, page, opts.outDir, 'b10-inline-reply.png')
     await page.waitForTimeout(2000)
-    // The zone's response tree only shows pending-confirmation responses by
-    // upstream design (inlineChatController's tree filter), so a plain text
-    // reply is not rendered inside the zone. What the user does see: the zone
-    // survives the turn and its input no longer holds the sent text.
+    // The fork's zone filter renders plain-text replies in place (upstream
+    // only shows pending-confirmation responses, which left ask-mode turns
+    // silent), so the streamed answer must be visible inside the zone.
     const zoneState = await page.evaluate(() => {
       const zone = document.querySelector('.inline-chat-2')
-      if (zone === null) return { alive: false, inputText: '' }
+      if (zone === null) return { alive: false, text: '', inputText: '' }
       const input = zone.querySelector('[role="textbox"]')
-      return { alive: true, inputText: input ? (input.textContent ?? '') : '' }
+      return { alive: true, text: zone.textContent ?? '', inputText: input ? (input.textContent ?? '') : '' }
     })
     await check(
-      'inline zone survives the turn and cleared the submitted input',
-      zoneState.alive && !zoneState.inputText.includes(INLINE_SENTINEL),
+      'inline zone renders the streamed reply',
+      zoneState.alive && /MOCK-REPLY-\d+/.test(zoneState.text),
       page,
       opts.outDir,
       'b11-inline-widget.png',
+    )
+    await check(
+      'inline zone cleared the submitted input',
+      !zoneState.inputText.includes(INLINE_SENTINEL),
+      page,
+      opts.outDir,
+      'b11b-inline-input.png',
     )
     await page.screenshot({ path: `${opts.outDir}/b12-inline-done.png` })
   } finally {

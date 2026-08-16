@@ -10,7 +10,7 @@ runtime that passed every existing check.
 | Script | Needs | Guards |
 | --- | --- | --- |
 | `runtime-settings.mjs` | runtime only | settings.json write/read round-trip (`User/`, never `Machine/`), workspace trust off, TS diagnostics alive |
-| `dsh-chat.mjs` | runtime + harness | Chat view + Ctrl+I inline chat: sentinel reaches the session, mock reply streams back into the widget, the turn's tool call renders as a row (`⚙ read broken.ts`), extension auto-install |
+| `dsh-chat.mjs` | runtime + harness | Chat view + Ctrl+I inline chat: sentinel reaches the session, mock reply streams back into the widget and (with the fork's zone filter) into the inline zone, the turn's tool call renders as a durable `✓ read broken.ts · Nms` row with a clickable file chip, extension auto-install |
 | `dsh-commands.mjs` | runtime + harness | `DSH: Ask` (selection context) and `DSH: Fix` (all five fixture diagnostics) reach the session and the conversation model |
 
 All three run against a **mock LLM** (OpenAI-compatible SSE, loopback only) —
@@ -57,7 +57,11 @@ Release workflow before a GitHub Release is published.
   LLM replies with an OpenAI `tool_calls` frame for `read broken.ts` and only
   answers in text on the follow-up request (after the tool result). This
   exercises the chat stream's tool forwarding (`tool`/`toolResult` SSE frames
-  and the `⚙` rows the extension renders) end to end.
+  and the `✓ … · Nms` row plus anchor chip the extension renders) end to end.
+  The extension also emits a transient `stream.progress` row while the tool
+  runs; the mock's `read` finishes faster than a render cycle, so the suite
+  only asserts the durable row — the spinner is visible for real (slow)
+  tools.
 - Wait for `/dsh-code-server/status` **by body** (`phase === "ready"`): the
   web app answers unknown paths with a 200 SPA fallback, so a bare 200 does
   not prove the plugin is up.
@@ -72,10 +76,11 @@ Release workflow before a GitHub Release is published.
   placeholder-based selector. That mismatch once read as "Ctrl+I dies after
   using the Chat view" — the zone opens fine; the selector was measuring the
   Chat view's input.
-- The inline zone's response tree shows only pending-confirmation responses
-  (upstream `inlineChatController` tree filter), so plain text replies are not
-  rendered inside the zone — assert delivery and turn completion in the
-  session log instead.
+- The inline zone's response tree is gated by `inlineChatController`'s tree
+  filter. Upstream 1.132 only renders pending-confirmation responses there;
+  the fork drops that gate so plain-text replies render in the zone (needs
+  runtime `4.132.0-dsh.5` or newer — older runtimes leave the zone silent
+  after submit).
 - The Ctrl+I keypress and the quick-input Enter submit are flaky on the first
   attempt; the helpers retry both and the retry loops are load-bearing.
 - Everything user-specific is a flag or env var. The suite must never embed
