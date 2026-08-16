@@ -1,22 +1,45 @@
 # dsh-code-server
 
-在不修改 DeepSeek Harness 源码的前提下，把 code-server 的完整 VS Code Workbench 嵌入 DSH Web 页面。DSH 中的文件链接会打开右侧编辑器抽屉，并通过 code-server 已有的 IPC 在当前编辑器窗口定位文件。LSP、终端、Git 和 VS Code 扩展仍由 code-server 的 Extension Host 提供。
+DeepSeek Harness（DSH）插件：为 DSH Web 装上完整 VS Code 工作台，并与你的 DSH
+会话打通——在编辑器里直接对话工作区 agent、把选区一键变成提问、会话里提到的文件
+点开即达，全程不用离开浏览器。
 
-## 当前兼容范围
+当前发布：**v0.1.4** · VS Code `1.132.0` · Linux 与 macOS（amd64 / arm64）
 
-- 已针对 DeepSeek Harness commit `47f9438`、DSH 裁剪版 code-server `4.132.0-dsh.1`（Code `1.132.0`）验证。
-- 仅支持单用户、localhost；code-server 被强制绑定到 `127.0.0.1` 并使用 `auth none`。
-- DSH 当前的文件点击链只传递路径，不传递 tool location 中的行号，因此第一版定位到第 1 行。
-- 浏览器里是内嵌 Workbench，但 code-server 仍监听独立的 loopback 端口。DSH 的 WebSocket 路由只支持精确路径，外部插件无法在不修改 DSH 的情况下完整代理 code-server 的动态 WebSocket 路径。
-- 唯一的非公开兼容点是浏览器插件对 `ctx.workspaces.openPath` 的可恢复包装。插件加载时会检查该方法是否存在且可写，卸载时恢复原始对象形状；DSH 升级后必须运行兼容测试。
-- bash 行克隆依赖锁定版本 DSH 的 keyed slot shadow 语义（同 key 低 priority 渲染）、`ui-primitives` 在模块表中的静态共享，以及工具渲染器的截断标记格式；这些前提全部在 `tests/dsh-compat.spec.ts` 中断言。
-- Ask DSH 依赖 host 侧 `agents` 服务（`followup` 投递）、`webServer.port`、workspace 实体的 `sessionIds` 投影，以及 `@deepseek-ai/dsh-llm` 的 `createUserMessage`（`source: {kind:'user'}` 使消息渲染为用户气泡而非上下文注入行）；这些形状同样在 `tests/dsh-compat.spec.ts` 中断言。
+## 功能
 
-`tests/dsh-compat.spec.ts` 会检查当前 sibling DSH checkout 的点击链、方法签名和 overlay slot。升级 DSH 后先运行 `pnpm check`；任何一项变化都会明确失败，而不是让点击行为静默退回系统默认应用。
+- **内嵌完整 VS Code 工作台。** 编辑器、集成终端、Git、扩展和语言服务器全部
+  可用；工作台显示在右侧抽屉里，可停靠在对话旁，也可切换为浮层。
+- **文件引用点击即开。** 对话中工具调用展示的文件路径，点击就在运行中的工作台
+  打开。
+- **原生 Chat 视图，直连 DSH 会话。** 回复边生成边流式上屏；工具调用渲染成
+  `⚙ read src/index.ts` 行，失败会单独标出。
+- **行内聊天（Ctrl+I）。** 选中代码按 Ctrl+I 提问，选区随问题一起发送；这轮
+  对话和回复都会出现在 DSH 对话流里。
+- **编辑器命令。** `DSH: Ask About This Selection`（也在编辑器右键菜单）、
+  `DSH: Fix Problems in This File`、`DSH: Explain Terminal Selection`，以及任意
+  诊断上提供的 `Fix with DSH` 快速修复。
+- **完整工具输出。** 输出被截断的 bash 卡片会出现 **Open full output** 按钮，
+  一键打开完整的 stdout/stderr 文件。
+- **不内置云端 AI。** 捆绑的工作台已移除 Copilot、Agent Host 和 MCP 运行时；
+  Chat 只与你自己的 DSH 会话通信。
+
+## 环境要求
+
+- 支持插件的 DeepSeek Harness（已针对 commit `47f9438` 验证）
+- Linux 或 macOS，x86-64 / ARM64；暂不支持 Windows
+- 安装后约 460 MB 磁盘占用
+- 可信的单用户 localhost 环境（见[安全边界](#安全边界)）
 
 ## 安装
 
-选择与系统匹配的完整发布包。发布包已经包含 code-server `4.132.0-dsh.1`，用户不需要单独安装 IDE：
+按平台选择发布包，加入 DSH profile：
+
+```bash
+dsh plugin --profile web add \
+  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.4/dsh-code-server-0.1.4-linux-amd64.tgz
+dsh --profile web
+```
 
 | 系统 | 发布包后缀 |
 | --- | --- |
@@ -25,38 +48,34 @@
 | macOS Intel | `macos-amd64` |
 | macOS Apple Silicon | `macos-arm64` |
 
-暂不支持 Windows。每个完整包下载约 110–121MB，安装解压后约占用 460MB。
-
-例如，在 Linux x86-64 上安装到 DSH 的 `web` profile：
-
-```bash
-dsh plugin --profile web add \
-  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.4/dsh-code-server-0.1.4-linux-amd64.tgz
-dsh --profile web --dump-config
-dsh --profile web
-```
-
-升级或回滚时，将命令中的两个版本号和平台后缀替换为目标制品并重新执行，然后重启 DSH、刷新浏览器。卸载会同时删除 profile 依赖和 bundle 层：
+发布包自包含——内置工作台运行时，无需单独安装 IDE。升级或回滚时把命令里的版本
+号换成目标版本重新执行，然后重启 DSH、刷新浏览器。卸载：
 
 ```bash
 dsh plugin --profile web remove dsh-code-server
 ```
 
-完整包使用 [`iMMIQ/code-server`](https://github.com/iMMIQ/code-server/tree/dsh-v4.132.0) 的已审计裁剪版：移除内置 Copilot、Chat、Agent Host 和 MCP 运行时，保留编辑器、终端、Git、Extension Host 与 LSP。对应源码提交通过 `third_party/code-server` submodule 固定；MIT License 和第三方声明保留在包内 `vendor/code-server` 目录。
+## 使用
 
-从源码开发时，可以构建本仓库并安装本地 checkout：
+- 打开 DSH Web，点右下角 `</>` 按钮展开编辑器：工作台在对话旁的抽屉里打开。
+  停靠模式下对话区会自动收窄重排而不是被遮挡；视口宽度不足 800px 时自动切换
+  为全屏浮层。收起抽屉不会卸载工作台，编辑状态、终端和扩展都保留。
+- 点击对话里的文件路径即可在工作台打开（当前定位到第 1 行）。
+- Chat 视图在工作台的副侧边栏（也可用命令面板的 *Chat: Focus on Chat View*
+  打开）。输入问题，工作区的 DSH 会话流式作答。该工作区需要已有活跃会话——
+  先在 DSH 里打开，否则会得到明确的报错。
+- 选中代码按 Ctrl+I 行内提问：选区随问题一起发送，回复落在 DSH 对话流里。
+- 右键选区用 `DSH: Ask About This Selection`；带诊断的文件用
+  `DSH: Fix Problems in This File`；光标停在问题上时，从灯泡菜单或问题面板
+  取 `Fix with DSH` 快速修复；在终端里选中输出后运行
+  `DSH: Explain Terminal Selection`。
+- 输出被截断的 bash 卡片，点 **Open full output** 在工作台打开完整输出文件。
 
-```bash
-pnpm install
-pnpm check
-cd /path/to/deepseek-harness
-pnpm dsh plugin --profile web add /path/to/dsh-code-server
-pnpm dsh --profile web
-```
+## 配置
 
-也可以不安装 bundle，用一次性 patch 加载已存在于 profile 依赖中的包。推荐使用 `dsh plugin add`，因为它会把本包的 `dsh.bundle` 层加入 profile。
-
-插件默认优先使用完整包内的 code-server，开发版没有内置运行时时才从 `PATH` 查找。地址默认是 `http://127.0.0.1:3081`。端口或可执行文件需要调整时，在 DSH 的用户 patch 中覆盖整段配置：
+工作台服务默认监听 `http://127.0.0.1:3081`，默认使用插件自带的 code-server
+（仅当内置运行时缺失时才用 `PATH` 上的副本，比如开发环境）。需要调整时在 DSH
+用户 patch 中覆盖整段配置——配置块是整体替换，请把需要的字段写全：
 
 ```yaml
 - id: dsh-code-server
@@ -67,22 +86,35 @@ pnpm dsh --profile web
     startupTimeoutMs: 20000
 ```
 
-Cordis patch 对 `config` 是整段替换，不是字段合并，所以覆盖时应保留所有需要的字段。
-
-## 使用
-
-打开 DSH Web 后，右下角的 `</>` 按钮可以展开编辑器。在对话中点击 read/edit 等工具展示的文件路径也会自动展开抽屉并在已经运行的 Workbench 中打开该文件。抽屉关闭时 iframe 不会卸载，因此扩展宿主和编辑状态会继续保留。
-
-bash 工具的输出超过内存上限时，DSH 只把截断尾部送到界面，完整输出由 harness 落在系统临时目录的 spill 文件里。展开这样的 bash 卡片后会出现 **Open full output** 按钮，点击即可在 Workbench 中打开对应的完整输出文件（stdout/stderr 各自的 spill 文件都有独立按钮）。该按钮通过 shadow 注册 `tool.call.toolview` 的 `bash` key 实现：插件内置了一份与锁定版本 DSH 行为一致的 bash 行克隆，兼容性同样由 `tests/dsh-compat.spec.ts` 断言。
-
-插件随包内置 **Ask DSH** workbench 扩展（安装时自动放进 code-server 的扩展目录，无需联网安装）。在编辑器中选中代码后，命令面板的 `DSH: Ask About This Selection` 或编辑器右键菜单即可把当前文件路径、语言、行范围和选区（上限 8000 字符）连同你的问题一起发给该工作区当前活跃的 DSH 会话。消息以普通用户气泡出现在 DSH 对话流里，agent 的回复也直接在对话流中展开。工作区没有活跃会话时会返回明确错误，先在 DSH 里打开该工作区的会话即可。
-
-桌面端默认使用停靠模式：编辑器占据右侧空间时，DSH 主框架会同步收窄，对话区重新排版而不会被遮挡。编辑器标题栏上的布局按钮可以在停靠和浮层之间切换，选择会保存在浏览器中。宽度不超过 800px 时自动使用全屏浮层，避免把对话区挤到不可用。
-
-插件会等到 DSH 至少注册了一个 workspace 后再创建 Workbench iframe。这样既保证 code-server 从一开始就打开正确目录，也避免其空 workspace 会话导致 `--reuse-window` 返回 500。
-
 ## 安全边界
 
-控制接口只接受同源 JSON 请求。文件会先经过 `realpath`，且必须位于 DSH 已注册 workspace 的规范路径之下，或者是 DSH 子进程在系统临时目录 `dsh-subprocess-*` 目录内创建的输出 spill 普通文件（symlink 逃逸会被 realpath 解析后拒绝）。子进程使用参数数组启动，不拼接 shell 命令。
+插件面向可信的单用户 localhost 环境。code-server 被强制绑定 `127.0.0.1` 且
+关闭认证，本机之外无法访问；工作台扩展发来的请求携带每次启动生成的一次性
+token；可打开的文件限定在已注册的 DSH workspace 及 DSH 自己的临时输出文件
+之内。安装本插件等价于给本机用户提供一个完整 IDE。
 
-Ask 请求走独立的鉴权：code-server 进程只在启动时经环境变量拿到一次性随机 token 和回环地址，扩展的请求必须携带该 token（常量时间比较），否则 403。投递目标由服务端解析——请求里的文件路径经 `realpath` 后定位到注册 workspace，再从该 workspace 的会话列表中选取最新的活跃 agent；扩展本身接触不到会话概念。该插件仍等价于给当前本机用户提供一个完整 IDE，只适用于可信 localhost 环境。
+## 兼容性
+
+每个发布版本都针对固定版本的 DSH 开发验证（见[环境要求](#环境要求)），依赖的
+集成面由自动化测试守卫。升级 DSH 后如遇异常，请换用与之匹配的插件版本。
+
+## 开发
+
+```bash
+pnpm install
+pnpm check        # 单元测试 + DSH 兼容性测试
+pnpm build
+
+cd /path/to/deepseek-harness
+pnpm dsh plugin --profile web add /path/to/dsh-code-server
+pnpm dsh --profile web
+```
+
+浏览器级端到端测试见 [`tests/e2e`](./tests/e2e/README.md)。
+
+## 许可证
+
+插件代码以 [GNU LGPL v3](./LICENSE) 发布。发布包内置的工作台运行时是
+[code-server](https://github.com/coder/code-server) 的裁剪版
+fork（[`iMMIQ/code-server` @ `dsh-v4.132.0`](https://github.com/iMMIQ/code-server/tree/dsh-v4.132.0)，
+MIT），其许可与第三方声明保留在包内 `vendor/code-server`。
