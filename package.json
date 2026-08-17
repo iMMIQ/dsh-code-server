@@ -42,6 +42,8 @@
     "lib/types/**/*.d.ts",
     "bin/dsh-code-server-runtime",
     "extension/extension.js",
+    "extension/prompt.js",
+    "extension/icon.svg",
     "extension/package.json",
     "vendor/code-server/**",
     "cordis.patch.yml",

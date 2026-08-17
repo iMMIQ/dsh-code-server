@@ -3,7 +3,10 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 output_dir=${1:?usage: package-runtimes.sh OUTPUT_DIR}
-code_server_version=4.132.0-dsh.5
+# The runtime version is owned by src/index.ts (BUNDLED_CODE_SERVER_VERSION);
+# deriving it here keeps the packaged dsh-runtime.json and the host-side check
+# from drifting apart — the mismatch that broke the v0.1.4 release boot.
+code_server_version=$(node -p "require('node:fs').readFileSync('$repo_root/src/index.ts','utf8').match(/BUNDLED_CODE_SERVER_VERSION = '([^']+)'/)[1]")
 code_server_repo=iMMIQ/code-server
 code_server_commit=024c825037fda0f687b0247f1dd915fa88c8c1eb
 package_version=$(node -p "require('$repo_root/package.json').version")

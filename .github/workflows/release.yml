@@ -58,7 +58,8 @@ jobs:
             if tar -xOf "$archive" \
               package/package.json package/README.md package/README.zh-CN.md \
               package/lib/index.js package/lib/client.js package/lib/client.js.map \
-              package/extension/extension.js package/extension/package.json \
+              package/extension/extension.js package/extension/prompt.js \
+              package/extension/icon.svg package/extension/package.json \
               | grep -E '/home/|/Users/|\\Users\\|/tmp/'; then
               echo "absolute local path found in $archive" >&2
               exit 1
@@ -75,11 +76,16 @@ jobs:
       - name: Smoke-test Linux x86-64 package
         run: |
           package_version=$(node -p "require('./dsh-code-server/package.json').version")
+          archive="$PWD/artifacts/dsh-code-server-$package_version-linux-amd64.tgz"
+          # The expected version comes from the archive's own descriptor, so
+          # this smoke never drifts from what was actually packaged.
+          expected_runtime=$(tar -xOf "$archive" package/vendor/code-server/dsh-runtime.json \
+            | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).version")
           mkdir runtime-smoke
           printf '%s\n' '{"name":"runtime-smoke","private":true}' > runtime-smoke/package.json
-          pnpm --dir runtime-smoke add "$PWD/artifacts/dsh-code-server-$package_version-linux-amd64.tgz"
+          pnpm --dir runtime-smoke add "$archive"
           NODE_EXEC_PATH="$(command -v node)" \
-            runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep '^4.132.0-dsh.4 '
+            runtime-smoke/node_modules/dsh-code-server/bin/dsh-code-server-runtime --version | grep "^$expected_runtime "
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -150,6 +156,44 @@ jobs:
           node dsh-code-server/tests/e2e/runtime-settings.mjs --runtime "$RUNTIME"
           node dsh-code-server/tests/e2e/dsh-chat.mjs --runtime "$RUNTIME" --harness "$HARNESS"
           node dsh-code-server/tests/e2e/dsh-commands.mjs --runtime "$RUNTIME" --harness "$HARNESS"
+
+      - name: Boot smoke with the packaged plugin and default config
+        # The e2e suites override `executable` via a user patch, which skips
+        # defaultCodeServerExecutable's bundled-runtime version check — the
+        # exact path that shipped broken in v0.1.4. This step installs the
+        # packaged tgz the README way and boots with the plugin's defaults.
+        env:
+          DEEPSEEK_API_KEY: e2e-mock-not-a-real-key
+        run: |
+          set -eu
+          package_version=$(node -p "require('./dsh-code-server/package.json').version")
+          cli="$PWD/deepseek-harness/apps/cli/lib/bin.js"
+          archive="$PWD/artifacts/dsh-code-server-$package_version-linux-amd64.tgz"
+          home="$PWD/boot-smoke/dsh-home"
+          ws="$PWD/boot-smoke/ws"
+          mkdir -p "$home" "$ws"
+          DSH_HOME="$home" node "$cli" plugin --profile web add "$archive"
+          DSH_HOME="$home" DEEPSEEK_API_KEY=e2e-mock-not-a-real-key \
+            node "$cli" --profile web --port 3199 > boot-smoke/dsh.log 2>&1 &
+          boot_pid=$!
+          trap 'kill "$boot_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 45); do
+            curl -sf http://127.0.0.1:3199/ >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -sf -X POST http://127.0.0.1:3199/api/workspace.create \
+            -H 'content-type: application/json' \
+            -d '{"type":"client-request","rpcId":"boot-smoke-ws","method":"workspace.create","payload":{"path":"'"$ws"'"}}' >/dev/null
+          for i in $(seq 1 45); do
+            if curl -sf http://127.0.0.1:3199/dsh-code-server/status | grep -q '"phase":"ready"'; then
+              echo "default-config boot reached ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "default-config boot never became ready" >&2
+          cat boot-smoke/dsh.log >&2
+          exit 1
 
       - name: Upload e2e artifacts on failure
         if: failure()
