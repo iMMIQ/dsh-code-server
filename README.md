@@ -13,7 +13,8 @@ Current release: **v0.1.5** · VS Code `1.132.0` · Linux & macOS (amd64 / arm64
   extensions and language servers run in a right-hand drawer that docks beside
   the conversation or floats above it.
 - **File references open in the editor.** Click a file path shown by a
-  conversation tool call and it opens in the running workbench.
+  conversation tool call and it opens in the running workbench; read rows land
+  on the line the agent was reading.
 - **A native Chat view connected to your DSH session.** Replies stream in as
   they are generated; each tool call leaves a `✓ read src/index.ts · 12ms`
   row with a clickable file chip, and failures are called out separately.
@@ -69,8 +70,9 @@ dsh plugin --profile web remove dsh-code-server
   conversation reflows instead of being covered; below 800px viewport width
   the editor becomes a fullscreen overlay. Collapsing the drawer keeps the
   workbench alive — edits, terminals and extensions survive.
-- Click file paths in the conversation to open them in the workbench
-  (positioning currently lands on line 1).
+- Click file paths in the conversation to open them in the workbench. A read
+  tool row lands on the line its read window started at; other rows open at
+  line 1.
 - The Chat view sits in the workbench's secondary side bar (or open it via
   *Chat: Focus on Chat View* in the command palette). Type a question and the
   workspace's DSH session answers, streaming into the view. The workspace

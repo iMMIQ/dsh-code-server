@@ -1,6 +1,7 @@
 import { DrawerController, installOpenPathAdapter } from './controller.ts'
 import { IdeDrawer } from './IdeDrawer.tsx'
 import { BashRow, type BashRowProps } from './bash-row.tsx'
+import { ReadRow, type ReadRowProps } from './read-row.tsx'
 import { installStyles } from './styles.ts'
 
 interface BrowserContext {
@@ -49,4 +50,13 @@ export function apply(ctx: BrowserContext): void {
     priority: -1,
     locale: 'conversation',
   }, (props: Omit<BashRowProps, 'controller'>) => <BashRow {...props} controller={controller} />))
+  // Shadow DSH's read tool row the same way: the clone's path link carries the
+  // read window's first line, so the workbench reveals the line the agent was
+  // reading instead of line 1.
+  ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+    name: 'tool.call.toolview',
+    key: 'read',
+    priority: -1,
+    locale: 'conversation',
+  }, (props: Omit<ReadRowProps, 'controller'>) => <ReadRow {...props} controller={controller} />))
 }

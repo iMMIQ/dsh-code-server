@@ -87,4 +87,34 @@ describe('DeepSeek Harness 47f9438 compatibility seam', () => {
     expect(source).toContain('user: { kind: \'user\' }')
     expect(source).toMatch(/export function createUserMessage/)
   })
+
+  it('still registers the upstream read row at the default priority', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/client/ui-tool/src/client/tool/toolviews/read-row.tsx'), 'utf8')
+    expect(source).toContain("ctx.slots.register({ name: 'tool.call.toolview', key: 'read', locale: NS }, ReadRow)")
+  })
+
+  it('still numbers the read result view lines off the file', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/client/ui-tool/src/client/tool/models/read-card-model.ts'), 'utf8')
+    expect(source).toContain("const lines: ReadBlockLine[] = result.lines.map(line => ({ number: line.number, text: line.text }))")
+    expect(source).toContain('label: result.title ?? relativizeToCwd(result.path, sessionCwd)')
+  })
+
+  it('still derives the read summary and file path from the path keys', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/client/ui-tool/src/client/tool/models/tool-call-model.ts'), 'utf8')
+    expect(source).toContain("read: ['path', 'file_path', 'url']")
+    expect(source).toContain("const FILE_PATH_KEYS = ['path', 'file_path'] as const")
+    expect(source).toContain("new Set(['read', 'write', 'edit'])")
+  })
+
+  it('still exposes the 1-based read offset our landing line falls back to', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/fs/tool-fs/src/read.ts'), 'utf8')
+    expect(source).toContain("offset: { type: 'number', description: '1-based first line to return. Defaults to 1.' }")
+  })
+
+  it('still resolves workspace-relative open targets against the session cwd', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/client/runtime/src/client/workspaces/path.ts'), 'utf8')
+    expect(source).toContain('export function resolveWorkspacePath(cwd: string | undefined, path: string): string')
+    expect(source).toContain('return path')
+    expect(source).toContain('return `${base}/${rel}`')
+  })
 })

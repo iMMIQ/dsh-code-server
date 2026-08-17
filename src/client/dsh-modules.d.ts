@@ -38,9 +38,26 @@ declare module '@deepseek-ai/dsh-client-ui-primitives' {
 
   export function TerminalBlock(props: TerminalBlockProps & { children?: ReactNode }): JSX.Element
 
+  export interface ReadBlockLine {
+    number: number
+    text: string
+  }
+
+  export interface ReadBlockProps {
+    label?: string | undefined
+    lines: readonly ReadBlockLine[]
+    totalLines: number
+    lang?: string | undefined
+    maxLines?: number | undefined
+    className?: string | undefined
+  }
+
+  export function ReadBlock(props: ReadBlockProps & { children?: ReactNode }): JSX.Element
+
   export function StateDot(props: { state: 'error' | 'warning' | 'ok' | string; size?: number }): JSX.Element
 
   export function IconApiOutline14(props: { size?: number; className?: string }): JSX.Element
+  export function IconBrowseOutline16(props: { size?: number; className?: string }): JSX.Element
   export function IconChevronDownOutline14(props: { size?: number; className?: string }): JSX.Element
   export function IconInspectOutline12(props: { size?: number; className?: string }): JSX.Element
 }

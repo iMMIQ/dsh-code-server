@@ -62,6 +62,12 @@ const CSS = `
 .dcs-br-card:hover .dcs-br-inspect,.dcs-br-inspect:focus-visible{opacity:1}
 .dcs-br-inspect:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}
 .dcs-br-vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+/* Cloned read tool row additions: the summary path link (same geometry as
+   .dcs-br-summary, with the persistent link affordance upstream's ToolRow
+   draws) and the ReadBlock body margin the io-card/terminal clones share. */
+.dcs-br-file-link{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;padding:0;border:none;background:none;font:inherit;text-align:left;font-size:14px;line-height:24px;color:var(--dsw-alias-label-secondary);text-decoration:underline;text-decoration-color:var(--dsw-alias-label-quaternary);text-underline-offset:3px;cursor:pointer}
+.dcs-br-file-link:hover{color:var(--dsw-alias-label-primary);text-decoration-color:currentColor}
+.dcs-br-read{margin:4px 0 4px 4px}
 `
 
 export function installStyles(): () => void {

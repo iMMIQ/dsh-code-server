@@ -75,6 +75,7 @@ export async function startDshStack({
   outDir,
   activationSentinel,
   toolCallMarker,
+  toolCallArguments,
 }) {
   const home = join(baseDir, 'dsh-home')
   const ws = join(baseDir, 'ws')
@@ -110,9 +111,10 @@ export async function startDshStack({
     logFile: join(baseDir, 'llm-requests.jsonl'),
     // When a test passes a marker, the turn carrying it starts with a real
     // `read` tool call on the fixture, so the chat stream's tool rows are
-    // exercised end to end.
+    // exercised end to end. `toolCallArguments` overrides the default target
+    // (e.g. a windowed read with an offset, for line-positioning assertions).
     ...(toolCallMarker === undefined ? {} : {
-      toolCall: { match: toolCallMarker, name: 'read', arguments: { file_path: 'broken.ts' } },
+      toolCall: { match: toolCallMarker, name: 'read', arguments: toolCallArguments ?? { file_path: 'broken.ts' } },
     }),
   })
 
