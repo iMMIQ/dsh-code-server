@@ -4,7 +4,7 @@ DeepSeek Harness（DSH）插件：为 DSH Web 装上完整 VS Code 工作台，�
 会话打通——在编辑器里直接对话工作区 agent、把选区一键变成提问、会话里提到的文件
 点开即达，全程不用离开浏览器。
 
-当前发布：**v0.1.4** · VS Code `1.132.0` · Linux 与 macOS（amd64 / arm64）
+当前发布：**v0.1.5** · VS Code `1.132.0` · Linux 与 macOS（amd64 / arm64）
 
 ## 功能
 
@@ -37,7 +37,7 @@ DeepSeek Harness（DSH）插件：为 DSH Web 装上完整 VS Code 工作台，�
 
 ```bash
 dsh plugin --profile web add \
-  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.4/dsh-code-server-0.1.4-linux-amd64.tgz
+  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.5/dsh-code-server-0.1.5-linux-amd64.tgz
 dsh --profile web
 ```
 

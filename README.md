@@ -5,7 +5,7 @@ Web and wires it into your live DSH sessions — chat with the workspace agent
 from inside the editor, turn selections into questions, and open any file the
 conversation mentions, all without leaving the browser.
 
-Current release: **v0.1.4** · VS Code `1.132.0` · Linux & macOS (amd64 / arm64)
+Current release: **v0.1.5** · VS Code `1.132.0` · Linux & macOS (amd64 / arm64)
 
 ## What you get
 
@@ -42,7 +42,7 @@ Pick the release archive for your platform and add it to a DSH profile:
 
 ```bash
 dsh plugin --profile web add \
-  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.4/dsh-code-server-0.1.4-linux-amd64.tgz
+  https://github.com/iMMIQ/dsh-code-server/releases/download/v0.1.5/dsh-code-server-0.1.5-linux-amd64.tgz
 dsh --profile web
 ```
 
