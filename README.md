@@ -110,9 +110,11 @@ keep every field you need:
 The plugin targets a trusted, single-user localhost setup. code-server is
 forced to bind to `127.0.0.1` with authentication disabled, so nothing
 outside the machine can reach it. Requests from the workbench extension carry
-a one-time token generated at each launch, and opening files is limited to
-your registered DSH workspaces and DSH's own temporary output files.
-Installing this plugin is equivalent to giving the local user a full IDE.
+a one-time token generated at each launch. File opens follow chat rows to any
+existing local path — workspace files, DSH output spill, scratch files under
+/tmp — which only mirrors what the workbench's own open dialogs already
+expose. Installing this plugin is equivalent to giving the local user a full
+IDE.
 
 ## Compatibility
 

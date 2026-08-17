@@ -92,8 +92,9 @@ dsh plugin --profile web remove dsh-code-server
 
 插件面向可信的单用户 localhost 环境。code-server 被强制绑定 `127.0.0.1` 且
 关闭认证，本机之外无法访问；工作台扩展发来的请求携带每次启动生成的一次性
-token；可打开的文件限定在已注册的 DSH workspace 及 DSH 自己的临时输出文件
-之内。安装本插件等价于给本机用户提供一个完整 IDE。
+token。文件打开跟随会话行指向任意已存在的本地路径——workspace 文件、DSH
+临时输出、/tmp 下的草稿均可——这与工作台自带打开对话框本就能访问的范围
+一致。安装本插件等价于给本机用户提供一个完整 IDE。
 
 ## 兼容性
 

@@ -1,10 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { cp, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { homedir, tmpdir } from 'node:os'
-import { basename, dirname, isAbsolute, join, relative } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
@@ -452,50 +452,18 @@ function contains(root: string, target: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel))
 }
 
-/** Resolve symlinks and reject targets outside every registered DSH workspace. */
-export async function authorizeWorkspacePath(path: string, workspaceRoots: readonly string[]): Promise<string> {
-  const target = await realpath(path)
-  const roots = await Promise.all(workspaceRoots.map(root => realpath(root)))
-  if (!roots.some(root => contains(root, target))) {
-    throw new Error('path is outside the registered DSH workspaces')
-  }
-  return target
-}
-
 /**
- * Accept a DSH subprocess output-spill file: a regular file directly under a
- * `dsh-subprocess-*` directory the harness created in the OS temp dir (see
- * `dsh-subprocess-local`'s `defaultSpillDir`). Long bash output is spilled
- * there and only the truncated tail reaches the UI, so opening those files is
- * how the workbench shows the full output. Resolved through realpath, so a
- * symlink planted inside the spill dir cannot point elsewhere.
+ * Canonicalize an open request target: any existing local path is openable.
+ * The sidecar already hands the local user a full IDE over the whole
+ * filesystem, so restricting the route's targets would not add real
+ * protection — and chat rows legitimately point outside the registered
+ * workspaces (DSH output spill, scratch files under /tmp, ...).
  */
-export async function authorizeSpillPath(path: string): Promise<string> {
-  const target = await realpath(path)
-  const reject = (): Error => new Error('path is not a DSH output spill file')
-  const spillDir = dirname(target)
-  if (spillDir === target || basename(spillDir).startsWith('dsh-subprocess-') === false
-    || dirname(spillDir) !== await realpath(tmpdir())) {
-    throw reject()
-  }
-  const info = await stat(target)
-  if (!info.isFile()) throw reject()
-  return target
-}
-
-/**
- * Authorize an open request target: a canonical file under a registered DSH
- * workspace, or a DSH output spill file in the OS temp dir.
- */
-export async function authorizeOpenPath(path: string, workspaceRoots: readonly string[]): Promise<string> {
+export async function resolveOpenPath(path: string): Promise<string> {
   try {
-    return await authorizeWorkspacePath(path, workspaceRoots)
-  } catch (reason) {
-    try {
-      return await authorizeSpillPath(path)
-    } catch {
-      throw reason
-    }
+    return await realpath(path)
+  } catch {
+    throw new Error(`path does not exist: ${path}`)
   }
 }
 
@@ -683,7 +651,7 @@ export function apply(ctx: HostContext, rawConfig: Config = {}): void {
         }
         try {
           const parsed = parseOpenRequest(await readJson(req))
-          const path = await authorizeOpenPath(parsed.path, roots())
+          const path = await resolveOpenPath(parsed.path)
           await sidecar.open({ ...parsed, path })
           sendJson(res, 200, { ok: true, path })
         } catch (reason) {
