@@ -1,11 +1,12 @@
-import { mkdtemp, mkdir, realpath, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, realpath, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  chatCaptureStep, containingWorkspaceRoot, defaultCodeServerExecutable, installAskExtension,
-  openCodeServerArgs, openFolderArgs, parseAskRequest, pickLiveSession, resolveAskWorkspace,
-  resolveOpenPath, summarizeToolResult, tokensEqual,
+  DEFAULT_WORKBENCH_SETTINGS, chatCaptureStep, containingWorkspaceRoot, defaultCodeServerExecutable,
+  installAskExtension, openCodeServerArgs, openFolderArgs, parseAskRequest, pickLiveSession,
+  purgeCopilotExtensions, resolveAskWorkspace, resolveOpenPath, seedWorkbenchSettings,
+  summarizeToolResult, tokensEqual,
 } from '../src/index.ts'
 
 describe('host boundary', () => {
@@ -175,6 +176,111 @@ describe('ask route helpers', () => {
     const ours = registry.find(row => row.identifier.id === 'immiq.dsh-ask')
     expect(ours?.version).toBe(manifest.version)
     expect(ours?.relativeLocation).toBe(target.split('/').pop())
+  })
+})
+
+describe('workbench settings seeding', () => {
+  it('creates the settings file with the defaults when absent', async () => {
+    const userDataDir = await mkdtemp(join(tmpdir(), 'dsh-cs-ud-'))
+    const applied = await seedWorkbenchSettings(userDataDir)
+    expect(applied).toEqual(Object.keys(DEFAULT_WORKBENCH_SETTINGS))
+    expect(DEFAULT_WORKBENCH_SETTINGS['chat.editor.localAgent.enabled']).toBe(false)
+    expect(DEFAULT_WORKBENCH_SETTINGS['workbench.secondarySideBar.defaultVisibility']).toBe('hidden')
+    const settings = JSON.parse(await readFile(join(userDataDir, 'User', 'settings.json'), 'utf8')) as Record<string, unknown>
+    expect(settings).toEqual(DEFAULT_WORKBENCH_SETTINGS)
+  })
+
+  it('adds missing keys while keeping explicit user values untouched', async () => {
+    const userDataDir = await mkdtemp(join(tmpdir(), 'dsh-cs-ud-'))
+    const settingsPath = join(userDataDir, 'User', 'settings.json')
+    await mkdir(dirname(settingsPath))
+    await writeFile(settingsPath, `${JSON.stringify({
+      'chat.editor.localAgent.enabled': true, // an explicit user choice must win
+      'editor.fontSize': 13,
+    }, undefined, '\t')}\n`)
+    const applied = await seedWorkbenchSettings(userDataDir, {
+      'chat.editor.localAgent.enabled': false,
+      'workbench.colorTheme': 'Default Dark Modern',
+    })
+    expect(applied).toEqual(['workbench.colorTheme'])
+    const settings = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>
+    expect(settings).toEqual({
+      'chat.editor.localAgent.enabled': true,
+      'editor.fontSize': 13,
+      'workbench.colorTheme': 'Default Dark Modern',
+    })
+  })
+
+  it('leaves an unparsable settings file untouched', async () => {
+    const userDataDir = await mkdtemp(join(tmpdir(), 'dsh-cs-ud-'))
+    const settingsPath = join(userDataDir, 'User', 'settings.json')
+    await mkdir(dirname(settingsPath))
+    await writeFile(settingsPath, '// hand-written comment\n{"editor.fontSize": 12}')
+    expect(await seedWorkbenchSettings(userDataDir)).toEqual([])
+    expect(await readFile(settingsPath, 'utf8')).toContain('hand-written comment')
+  })
+})
+
+describe('copilot residue purge', () => {
+  it('removes copilot directories and registry rows, keeping everything else', async () => {
+    const extensionsDir = await mkdtemp(join(tmpdir(), 'dsh-cs-ext-'))
+    for (const entry of [
+      'github.copilot-1.2.3',
+      'github.copilot-chat-0.60.0',
+      'github.vscode-pull-request-github-1.0.0', // github.* but not copilot
+      'immiq.dsh-ask-0.1.6',
+    ]) {
+      await mkdir(join(extensionsDir, entry))
+    }
+    // Registry rows carry the real scanner shape; one invalid row aborts the
+    // workbench's whole profile scan, so the fixture must stay well-formed.
+    const row = (id: string, version: string, dir: string) => ({
+      identifier: { id },
+      version,
+      location: { $mid: 1, path: join(extensionsDir, dir), scheme: 'file' },
+      relativeLocation: dir,
+    })
+    await writeFile(join(extensionsDir, 'extensions.json'), JSON.stringify([
+      row('GitHub.copilot-chat', '0.60.0', 'github.copilot-chat-0.60.0'),
+      row('immiq.dsh-ask', '0.1.6', 'immiq.dsh-ask-0.1.6'),
+    ]))
+    const removed = await purgeCopilotExtensions(extensionsDir)
+    expect(removed).toEqual(['GitHub.copilot-chat'])
+    expect(await readdir(extensionsDir)).toEqual(expect.arrayContaining([
+      'extensions.json', 'github.vscode-pull-request-github-1.0.0', 'immiq.dsh-ask-0.1.6',
+    ]))
+    expect(await readdir(extensionsDir)).not.toContain('github.copilot-1.2.3')
+    expect(await readdir(extensionsDir)).not.toContain('github.copilot-chat-0.60.0')
+    const registry = JSON.parse(await readFile(join(extensionsDir, 'extensions.json'), 'utf8')) as {
+      identifier: { id: string }
+    }[]
+    expect(registry.map(row => row.identifier.id)).toEqual(['immiq.dsh-ask'])
+  })
+
+  it('sweeps unregistered copilot directories and tolerates a broken registry', async () => {
+    const extensionsDir = await mkdtemp(join(tmpdir(), 'dsh-cs-ext-'))
+    await mkdir(join(extensionsDir, 'github.copilot-1.0.0'))
+    await writeFile(join(extensionsDir, 'extensions.json'), 'not json')
+    expect(await purgeCopilotExtensions(extensionsDir)).toEqual([])
+    expect(await readdir(extensionsDir)).toEqual(['extensions.json'])
+    expect(await readFile(join(extensionsDir, 'extensions.json'), 'utf8')).toBe('not json')
+  })
+
+  it('never follows a malicious registry location outside the extensions directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-cs-ext-root-'))
+    const extensionsDir = join(root, 'extensions')
+    const outside = join(root, 'keep-me')
+    await mkdir(extensionsDir)
+    await mkdir(outside)
+    await writeFile(join(outside, 'sentinel'), 'safe')
+    await writeFile(join(extensionsDir, 'extensions.json'), JSON.stringify([{
+      identifier: { id: 'GitHub.copilot-chat' },
+      version: '0.60.0',
+      relativeLocation: '../keep-me',
+    }]))
+
+    expect(await purgeCopilotExtensions(extensionsDir)).toEqual(['GitHub.copilot-chat'])
+    expect(await readFile(join(outside, 'sentinel'), 'utf8')).toBe('safe')
   })
 })
 

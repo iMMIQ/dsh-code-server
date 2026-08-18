@@ -13,12 +13,55 @@ import { randomUUID } from 'node:crypto'
 import { chromium } from 'playwright'
 import { parseArgs, portsFor, repoRoot } from './lib/args.mjs'
 import { makeBaseDir, startDshStack } from './lib/dsh-stack.mjs'
-import { check, focusEditor, openEditor, openWorkbench, runPaletteCommand, selectLine, waitFor } from './lib/workbench.mjs'
+import {
+  check,
+  focusEditor,
+  inlineChatInput,
+  openEditor,
+  openWorkbench,
+  runPaletteCommand,
+  selectLine,
+  submitWithRetry,
+  waitFor,
+} from './lib/workbench.mjs'
 
 const opts = parseArgs(process.argv.slice(2), { requireHarness: true })
 const ports = portsFor(opts.portBase)
 const runId = randomUUID().slice(0, 8)
 const ASK_SENTINEL = `E2EASK-${runId}`
+const INLINE_SENTINEL = `E2ECTXINLINE-${runId}`
+
+async function openSelectionContextMenu(page) {
+  await check('editor focused for context menu', await focusEditor(page), page, opts.outDir, 'c-context-focus.png')
+  await selectLine(page, 2)
+  await page.waitForTimeout(300)
+  // Keyboard invocation preserves the selection; a generic mouse right-click
+  // can land outside the selected range and collapse it.
+  await page.keyboard.press('Shift+F10')
+  await page.locator('.context-view .monaco-menu').waitFor({ timeout: 10_000 })
+}
+
+async function clickSelectionContextItem(page, label) {
+  await openSelectionContextMenu(page)
+  const menu = page.locator('.context-view .monaco-menu:visible').last()
+  const item = menu.getByText(label, { exact: true })
+  await item.click({ timeout: 10_000 })
+  await page.waitForTimeout(250)
+  // dsh.5's web menu occasionally treats Playwright's first click as pointer
+  // selection only. The row is then keyboard-focused, so Enter is the same
+  // activation path a user gets after opening the menu with Shift+F10.
+  if (await item.isVisible().catch(() => false)) await page.keyboard.press('Enter')
+  await item.waitFor({ state: 'hidden', timeout: 10_000 })
+  await page.waitForTimeout(500)
+}
+
+async function waitForDshTurn(stack, marker, from) {
+  return waitFor(() => {
+    const rest = stack.sessionLogText().slice(from)
+    const i = rest.indexOf(marker)
+    return i >= 0 && rest.slice(i).includes('turn/end')
+  }, 120_000, marker)
+}
 
 const base = await makeBaseDir()
 const stack = await startDshStack({
@@ -46,11 +89,53 @@ try {
     )
     await check('TypeScript diagnostics available', squiggles.ok, page, opts.outDir, 'c0-no-squiggles.png')
 
-    // ---- Ask: selection rides along ----
-    await check('editor focused', await focusEditor(page), page, opts.outDir, 'c1-focus.png')
-    await selectLine(page, 2)
+    // ---- Every AI-related editor menu entry belongs to DSH ----
+    await openSelectionContextMenu(page)
+    const contextMenuLabels = await page.locator('.context-view .monaco-menu .action-label').allTextContents()
+    console.log(`[editor-context] ${JSON.stringify(contextMenuLabels)}`)
+    await page.screenshot({ path: `${opts.outDir}/c1b-editor-context.png` })
+    const aiLabels = contextMenuLabels.filter(label => /chat|dsh|copilot|\bai\b|explain|fix|review/i.test(label))
+    await check(
+      'selection context exposes only DSH-backed AI commands',
+      JSON.stringify(aiLabels) === JSON.stringify([
+        'Open Inline Chat',
+        'DSH: Ask About This Selection',
+        'DSH: Explain Selection',
+        'DSH: Fix Selection',
+        'DSH: Review Selection',
+      ]),
+      page,
+      opts.outDir,
+      'c1c-unexpected-ai-menu.png',
+    )
+    await page.keyboard.press('Escape')
     await page.waitForTimeout(500)
-    await runPaletteCommand(page, 'DSH: Ask About This Selection')
+
+    // Open Inline Chat from the right-click menu and submit a uniquely marked
+    // request. The selected line must ride into the DSH session.
+    await clickSelectionContextItem(page, 'Open Inline Chat')
+    const inlineBox = await inlineChatInput(page)
+    await check('context-menu inline chat opens', inlineBox !== null, page, opts.outDir, 'c1d-inline-missing.png')
+    const inlineFrom = stack.sessionLogText().length
+    const inlineDelivered = () => {
+      const rest = stack.sessionLogText().slice(inlineFrom)
+      const i = rest.indexOf(INLINE_SENTINEL)
+      return i >= 0 && rest.slice(i).includes('nam')
+    }
+    await check(
+      'Open Inline Chat sends the selected code to DSH',
+      await submitWithRetry(page, inlineBox, `${INLINE_SENTINEL} explain this selection`, inlineDelivered),
+      page,
+      opts.outDir,
+      'c1e-inline-not-sent.png',
+    )
+    const inlineTurn = await waitForDshTurn(stack, INLINE_SENTINEL, inlineFrom)
+    await check('context-menu inline turn completes in DSH', inlineTurn.ok, page, opts.outDir, 'c1f-inline-turn.png')
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+
+    // ---- Ask: selection rides along ----
+    await clickSelectionContextItem(page, 'DSH: Ask About This Selection')
     await page.waitForTimeout(500)
     // The palette command prompts for the question: a quick-input box with
     // the DSH placeholder opens (distinct from the palette's own input).
@@ -75,6 +160,37 @@ try {
     }, 120_000, 'ask reply')
     await check('mock LLM answered the ask turn', askAnswered.ok, page, opts.outDir, 'c4-ask-reply.png')
     await check('ask turn reached the conversation model', stack.llmRequestLog().includes(ASK_SENTINEL), null, opts.outDir)
+
+    // ---- Explain / Fix / Review: every menu command sends directly to DSH ----
+    const directActions = [
+      {
+        label: 'DSH: Explain Selection',
+        marker: 'Explain the selected code:',
+        required: ['nam'],
+      },
+      {
+        label: 'DSH: Fix Selection',
+        marker: 'Fix the problems reported in this file.',
+        required: ['Ln 2 [ts 2552]', 'nam'],
+      },
+      {
+        label: 'DSH: Review Selection',
+        marker: 'Review the selected code for correctness',
+        required: ['nam'],
+      },
+    ]
+    for (const action of directActions) {
+      const from = stack.sessionLogText().length
+      await clickSelectionContextItem(page, action.label)
+      const delivered = await waitFor(() => {
+        const rest = stack.sessionLogText().slice(from)
+        return rest.includes(action.marker) && action.required.every(text => rest.includes(text))
+      }, 60_000, `${action.label} delivered`)
+      await check(`${action.label} sends the selection to DSH`, delivered.ok, page, opts.outDir, 'c4b-direct-action.png')
+      const completed = await waitForDshTurn(stack, action.marker, from)
+      await check(`${action.label} completes in DSH`, completed.ok, page, opts.outDir, 'c4c-direct-turn.png')
+      await check(`${action.label} reaches the conversation model`, stack.llmRequestLog().includes(action.marker), null, opts.outDir)
+    }
 
     // ---- Fix: sends immediately with the composed diagnostics ----
     await check('editor refocused for fix', await focusEditor(page), page, opts.outDir, 'c5-focus.png')

@@ -2,8 +2,11 @@
 // problems to the DeepSeek Harness agent session that owns the enclosing
 // workspace. The endpoint and bearer token arrive through DSH_ASK_ENDPOINT /
 // DSH_CHAT_ENDPOINT / DSH_ASK_TOKEN, which the dsh-code-server host plugin
-// injects into the code-server process env. The chat participant routes bare
-// messages (no @mention needed) and streams the session's reply back.
+// injects into the code-server process env. The chat participant backs the
+// editor inline chat (Ctrl+I) and the terminal chat: the conversation panel is
+// deliberately gone from this workbench — it lives in the DSH web app beside
+// it — so bare prompts land in the inline zones, which the isDefault
+// participant answers with the session's streamed reply.
 'use strict'
 
 const vscode = require('vscode')
@@ -82,6 +85,20 @@ async function fixDiagnostics(document, diagnostics) {
   const rows = diagnostics.map(d => toRow(document, d))
   const prompt = composeFixPrompt(document.uri.fsPath, document.languageId, rows)
   await deliver('Fix DSH', prompt, document.uri.fsPath)
+}
+
+async function deliverSelection(label, instruction) {
+  const editor = vscode.window.activeTextEditor
+  if (editor === undefined) {
+    vscode.window.showWarningMessage(`${label}: open a file in the editor first.`)
+    return
+  }
+  if (editor.selection.isEmpty) {
+    vscode.window.showInformationMessage(`${label}: select some code first.`)
+    return
+  }
+  const prompt = composePrompt(instruction, editor.document, editor.selection)
+  await deliver(label, prompt, editor.document.uri.fsPath)
 }
 
 /**
@@ -193,7 +210,9 @@ function registerChatParticipant(context) {
   // Agent-mode chat resolves a language model before invoking the participant.
   // The reply itself never comes from this provider — the participant streams
   // the DSH session's answer — but resolution must succeed, and the default
-  // model must live under the vendor the workbench hardcodes.
+  // model must live under the compatibility vendor the workbench hardcodes.
+  // Its display name and every request path are DSH; this id only lets older
+  // dsh.5 workbenches resolve a default model for Ctrl+I.
   try {
     context.subscriptions.push(vscode.lm.registerLanguageModelChatProvider('copilot', {
       provideLanguageModelChatInformation: async () => [{
@@ -284,6 +303,24 @@ function registerChatParticipant(context) {
 }
 
 function activate(context) {
+  // Keep editor/inline chat on the DSH participant even when an existing
+  // settings.json (including JSONC) predates the host-side defaults.
+  const localAgentConfig = vscode.workspace.getConfiguration('chat.editor.localAgent')
+  if (localAgentConfig.get('enabled') !== false) {
+    void localAgentConfig.update('enabled', false, vscode.ConfigurationTarget.Global).then(undefined, () => undefined)
+  }
+  const secondarySideBarConfig = vscode.workspace.getConfiguration('workbench.secondarySideBar')
+  if (secondarySideBarConfig.get('defaultVisibility') !== 'hidden') {
+    void secondarySideBarConfig.update('defaultVisibility', 'hidden', vscode.ConfigurationTarget.Global).then(undefined, () => undefined)
+  }
+
+  // Older bundled runtimes still register the Copilot-backed Chat view and may
+  // restore it from workspace layout state. Close the secondary side bar once
+  // startup finishes; the DSH fork removes that view entirely, where this is a
+  // harmless no-op. Users can still reopen the secondary side bar for any
+  // non-chat views they deliberately move there later.
+  void vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar').then(undefined, () => undefined)
+
   const ask = vscode.commands.registerCommand('dsh.ask', async () => {
     const editor = vscode.window.activeTextEditor
     if (editor === undefined) {
@@ -313,6 +350,37 @@ function activate(context) {
       return
     }
     await fixDiagnostics(editor.document, diagnostics)
+  })
+
+  const explainSelection = vscode.commands.registerCommand('dsh.explainSelection', async () => {
+    await deliverSelection(
+      'Explain DSH',
+      'Explain the selected code: what it does, any important assumptions, and any likely problem.',
+    )
+  })
+
+  const fixSelection = vscode.commands.registerCommand('dsh.fixSelection', async () => {
+    const editor = vscode.window.activeTextEditor
+    if (editor === undefined || editor.selection.isEmpty) {
+      vscode.window.showInformationMessage('Fix DSH: select some code first.')
+      return
+    }
+    const diagnostics = diagnosticsWithin(editor.document.uri, editor.selection)
+    if (diagnostics.length > 0) {
+      await fixDiagnostics(editor.document, diagnostics)
+      return
+    }
+    await deliverSelection(
+      'Fix DSH',
+      'Fix the selected code. Edit the file directly, keep the change minimal, and preserve unrelated behavior.',
+    )
+  })
+
+  const reviewSelection = vscode.commands.registerCommand('dsh.reviewSelection', async () => {
+    await deliverSelection(
+      'Review DSH',
+      'Review the selected code for correctness, maintainability, security, and missing tests. Suggest concrete fixes.',
+    )
   })
 
   // Internal command driven by the code action; diagnostics are recomputed at
@@ -353,8 +421,27 @@ function activate(context) {
     await deliver('Explain DSH', prompt, undefined)
   })
 
-  context.subscriptions.push(ask, fixFile, fixAt, provider, explainTerminal)
+  context.subscriptions.push(
+    ask,
+    fixFile,
+    explainSelection,
+    fixSelection,
+    reviewSelection,
+    fixAt,
+    provider,
+    explainTerminal,
+  )
   registerChatParticipant(context)
+
+  // dsh.5 compatibility: suppress the Copilot setup placeholders and the
+  // attach-to-panel commands after our participant is registered. The dsh.6
+  // fork removes those editor-menu registrations at source as well.
+  const hideLegacyCopilotMenus = () => {
+    void vscode.commands.executeCommand('setContext', 'chatSetupCompleted', true).then(undefined, () => undefined)
+    void vscode.commands.executeCommand('setContext', 'chatIsEnabled', false).then(undefined, () => undefined)
+  }
+  hideLegacyCopilotMenus()
+  setTimeout(hideLegacyCopilotMenus, 1500)
 }
 
 module.exports = { activate }

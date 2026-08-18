@@ -3,7 +3,7 @@
   "displayName": "Ask, Fix & Chat DSH",
   "description": "Chat with DSH in the editor, and send files, selections, or reported problems to the DeepSeek Harness agent session",
   "publisher": "immiq",
-  "version": "0.1.6",
+  "version": "0.1.8",
   "private": true,
   "license": "LGPL-3.0",
   "engines": {
@@ -29,6 +29,18 @@
         "title": "DSH: Fix Problems in This File"
       },
       {
+        "command": "dsh.explainSelection",
+        "title": "DSH: Explain Selection"
+      },
+      {
+        "command": "dsh.fixSelection",
+        "title": "DSH: Fix Selection"
+      },
+      {
+        "command": "dsh.reviewSelection",
+        "title": "DSH: Review Selection"
+      },
+      {
         "command": "dsh.explainTerminal",
         "title": "DSH: Explain Terminal Selection"
       }
@@ -39,6 +51,21 @@
           "command": "dsh.ask",
           "when": "editorTextFocus",
           "group": "9_dsh@0"
+        },
+        {
+          "command": "dsh.explainSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "9_dsh@1"
+        },
+        {
+          "command": "dsh.fixSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "9_dsh@2"
+        },
+        {
+          "command": "dsh.reviewSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "9_dsh@3"
         }
       ],
       "terminal/context": [
@@ -55,7 +82,7 @@
         "description": "Chat with the DeepSeek Harness agent session for this workspace",
         "isSticky": true,
         "isDefault": true,
-        "locations": ["panel", "editor", "terminal"],
+        "locations": ["editor", "terminal"],
         "modes": ["ask", "agent", "edit"],
         "commands": [
           {

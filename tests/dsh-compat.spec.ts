@@ -137,6 +137,63 @@ describe('DeepSeek Harness 47f9438 compatibility seam', () => {
   })
 })
 
+describe('code-server fork 4.132.0-dsh.5 chat-routing seam', () => {
+  it('still defaults the chat session target to the local agent we disable', async () => {
+    const constants = await readFile(
+      resolve(FORK_ROOT, 'lib/vscode/src/vs/workbench/contrib/chat/common/constants.ts'),
+      'utf8',
+    )
+    expect(constants).toContain("EditorLocalAgentEnabled = 'chat.editor.localAgent.enabled'")
+    expect(constants).toMatch(/getValue<boolean>\(ChatConfiguration\.EditorLocalAgentEnabled\) \?\? true/)
+  })
+
+  it('still force-enables proposed APIs so the default participant declaration holds', async () => {
+    const source = await readFile(
+      resolve(FORK_ROOT, 'lib/vscode/src/vs/workbench/services/extensions/common/extensions.ts'),
+      'utf8',
+    )
+    expect(source).toMatch(/export function isProposedApiEnabled\([^)]*\): boolean \{\s*return true/)
+  })
+
+  it('still gates default-participant declarations behind the proposal our fork unlocks', async () => {
+    const source = await readFile(
+      resolve(FORK_ROOT, 'lib/vscode/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts'),
+      'utf8',
+    )
+    expect(source).toContain('CANNOT use API proposal: defaultChatParticipant')
+  })
+
+  it('registers the chat participants extension point without the chat panel view', async () => {
+    const source = await readFile(
+      resolve(FORK_ROOT, 'lib/vscode/src/vs/workbench/contrib/chat/browser/chatParticipant.contribution.ts'),
+      'utf8',
+    )
+    expect(source).toContain("extensionPoint: 'chatParticipants'")
+    // The dsh profile ships no Chat view — the conversation lives in the DSH
+    // web app beside the workbench — so these registrations must stay deleted.
+    expect(source).not.toMatch(/registerViewContainer\(/)
+    expect(source).not.toMatch(/registerViews\(/)
+  })
+
+  it('keeps inline chat gated on the hidden key only, so it survives the panel removal', async () => {
+    const source = await readFile(
+      resolve(FORK_ROOT, 'lib/vscode/src/vs/workbench/contrib/inlineChat/browser/inlineChatActions.ts'),
+      'utf8',
+    )
+    expect(source).toContain('ChatEntitlementContextKeys.Setup.hidden.negate()')
+    expect(source).not.toContain('Setup.disabledInWorkspace')
+  })
+
+  it('degrades view lookups safely when the chat view is absent', async () => {
+    const source = await readFile(
+      resolve(FORK_ROOT, 'lib/vscode/src/vs/workbench/contrib/chat/browser/widget/chatWidgetService.ts'),
+      'utf8',
+    )
+    expect(source).toContain('getViewWithId<ChatViewPane>(ChatViewId)')
+    expect(source).toContain('chatView?.widget')
+  })
+})
+
 describe('code-server fork 4.132.0-dsh.5 workspace-switch seam', () => {
   it('still maps CLI directory args onto folderURIs', async () => {
     const source = await readFile(resolve(FORK_ROOT, 'src/node/main.ts'), 'utf8')

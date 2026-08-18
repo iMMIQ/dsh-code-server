@@ -19,9 +19,10 @@ Current release: **v0.1.5** · VS Code `1.132.0` · Linux & macOS (amd64 / arm64
   conversation tool call and it opens in the running workbench — the window
   first switches to the file's owning workspace when needed; read rows land
   on the line the agent was reading.
-- **A native Chat view connected to your DSH session.** Replies stream in as
-  they are generated; each tool call leaves a `✓ read src/index.ts · 12ms`
-  row with a clickable file chip, and failures are called out separately.
+- **No chat panel — the conversation stays in DSH.** The workbench ships
+  without the VS Code Chat view: the drawer's left side already is the DSH
+  conversation, so a second one would only duplicate it. The editor-anchored
+  surfaces below still stream the session's replies, tool calls and all.
 - **Inline chat (Ctrl+I).** Select code, press Ctrl+I and ask — the selection
   travels with the question, the answer streams into the inline zone, and the
   turn also lands in the DSH conversation.
@@ -32,7 +33,13 @@ Current release: **v0.1.5** · VS Code `1.132.0` · Linux & macOS (amd64 / arm64
   **Open full output** button that opens the complete stdout/stderr files.
 - **No bundled cloud AI.** Copilot, the agent host and the MCP runtime are
   removed from the bundled workbench; the Chat surfaces talk to your own DSH
-  session only.
+  session only. The plugin also seeds `chat.editor.localAgent.enabled: false`
+  and `workbench.secondarySideBar.defaultVisibility: hidden`, enforces both
+  through VS Code's configuration API after activation (including JSONC user
+  settings), and closes a restored secondary side bar on startup. Bare input
+  and Ctrl+I therefore go to the DSH participant and DSH session instead of the
+  removed built-in agent. It also sweeps any residual `github.copilot*`
+  extension left by older runtimes or manual installs.
 
 ## Requirements
 
@@ -77,11 +84,10 @@ dsh plugin --profile web remove dsh-code-server
 - Click file paths in the conversation to open them in the workbench. A read
   tool row lands on the line its read window started at; other rows open at
   line 1.
-- The Chat view sits in the workbench's secondary side bar (or open it via
-  *Chat: Focus on Chat View* in the command palette). Type a question and the
-  workspace's DSH session answers, streaming into the view. The workspace
-  needs an active session — start one in DSH first; otherwise you get a clear
-  error.
+- There is no chat panel in the workbench on purpose — the DSH conversation
+  next to it is the chat. Ask from the editor instead: Ctrl+I inline chat,
+  the right-menu commands, or the quick-fixes below. The workspace needs an
+  active session — start one in DSH first; otherwise you get a clear error.
 - Select code and press Ctrl+I for inline chat: the selection is sent along
   with the question, the answer streams into the zone right in the editor,
   and the turn is recorded in the DSH conversation.

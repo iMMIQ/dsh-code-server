@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { cp, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
-import { isAbsolute, join, relative } from 'node:path'
+import { isAbsolute, dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
@@ -198,6 +198,102 @@ async function registerScannedExtension(extensionsDir: string, version: string):
     relativeLocation: `${ASK_EXTENSION_ID}-${version}`,
   })
   await writeFile(registryPath, `${JSON.stringify(kept, undefined, '\t')}\n`)
+}
+
+/** Installed-extension ids the DSH profile must never carry into the workbench. */
+const COPILOT_EXTENSION_ID = /^github\.copilot($|-)/i
+
+/**
+ * Workbench settings seeded into the user settings on every sidecar start.
+ * The native "Local" chat-session target routes bare chat input into the
+ * built-in agent host, which the dsh runtime trims away — messages sent there
+ * die silently instead of reaching the DSH agent. With the local agent
+ * disabled, the chat view and the inline chat fall back to the default
+ * participant, which is the DSH participant this plugin installs.
+ */
+export const DEFAULT_WORKBENCH_SETTINGS: Readonly<Record<string, unknown>> = {
+  'chat.editor.localAgent.enabled': false,
+  'workbench.secondarySideBar.defaultVisibility': 'hidden',
+}
+
+/**
+ * Merge {@link DEFAULT_WORKBENCH_SETTINGS} into the workbench user settings,
+ * creating the file when absent. Missing keys only: a value the user set
+ * explicitly always wins. Returns the applied keys; an unparsable (e.g.
+ * JSONC-with-comments) file is left untouched so hand-edited settings survive.
+ */
+export async function seedWorkbenchSettings(
+  userDataDir: string,
+  settings: Readonly<Record<string, unknown>> = DEFAULT_WORKBENCH_SETTINGS,
+): Promise<string[]> {
+  const settingsPath = join(userDataDir, 'User', 'settings.json')
+  let parsed: Record<string, unknown> = {}
+  try {
+    parsed = JSON.parse(await readFile(settingsPath, 'utf8')) as Record<string, unknown>
+  } catch (reason) {
+    if ((reason as NodeJS.ErrnoException).code !== 'ENOENT') return []
+  }
+  const merged = { ...parsed }
+  const applied: string[] = []
+  for (const [key, value] of Object.entries(settings)) {
+    if (!(key in merged)) {
+      merged[key] = value
+      applied.push(key)
+    }
+  }
+  if (applied.length > 0) {
+    await mkdir(dirname(settingsPath), { recursive: true })
+    await writeFile(settingsPath, `${JSON.stringify(merged, undefined, '\t')}\n`)
+  }
+  return applied
+}
+
+/**
+ * Delete residual Copilot extensions from the user extensions dir. The dsh
+ * runtime builds without them and its open-vsx gallery does not distribute
+ * them, so any copy found here is residue from an older runtime or a manual
+ * install — left in place, the workbench boots Copilot ahead of the DSH
+ * agent. Both the directory and its `extensions.json` registry row go;
+ * unregistered directories are matched by their `publisher.name-version`
+ * layout. Returns the removed registry ids.
+ */
+export async function purgeCopilotExtensions(extensionsDir: string): Promise<string[]> {
+  const registryPath = join(extensionsDir, 'extensions.json')
+  let rows: unknown[] = []
+  try {
+    const parsed = JSON.parse(await readFile(registryPath, 'utf8')) as unknown
+    if (Array.isArray(parsed)) rows = parsed
+  } catch {
+    // Missing or unreadable registry: the directory sweep below still applies.
+  }
+  const removed: string[] = []
+  const kept: unknown[] = []
+  for (const row of rows) {
+    const id = (row as { identifier?: { id?: unknown } } | null)?.identifier?.id
+    if (typeof id === 'string' && COPILOT_EXTENSION_ID.test(id)) {
+      removed.push(id)
+      const relativeLocation = (row as { relativeLocation?: unknown } | null)?.relativeLocation
+      if (
+        typeof relativeLocation === 'string'
+        && COPILOT_EXTENSION_ID.test(relativeLocation)
+        && !relativeLocation.includes('/')
+        && !relativeLocation.includes('\\')
+      ) {
+        // Scanner locations are direct children. Refusing nested/absolute
+        // values also prevents a corrupted registry from escaping this dir.
+        await rm(join(extensionsDir, relativeLocation), { recursive: true, force: true }).catch(() => undefined)
+      }
+    } else {
+      kept.push(row)
+    }
+  }
+  for (const entry of await readdir(extensionsDir).catch(() => [] as string[])) {
+    if (COPILOT_EXTENSION_ID.test(entry)) {
+      await rm(join(extensionsDir, entry), { recursive: true, force: true }).catch(() => undefined)
+    }
+  }
+  if (removed.length > 0) await writeFile(registryPath, `${JSON.stringify(kept, undefined, '\t')}\n`)
+  return removed
 }
 
 function resolveConfig(config: Config = {}): ResolvedConfig {
@@ -546,6 +642,12 @@ class CodeServerSidecar {
   ): Promise<void> {
     await Promise.all([mkdir(this.config.userDataDir, { recursive: true }), mkdir(this.config.extensionsDir, { recursive: true })])
     await installAskExtension(this.config.extensionsDir)
+    const seeded = await seedWorkbenchSettings(this.config.userDataDir)
+    if (seeded.length > 0) this.ctx.logger.info(`dsh-code-server: seeded workbench settings (${seeded.join(', ')})`)
+    const purged = await purgeCopilotExtensions(this.config.extensionsDir)
+    if (purged.length > 0) {
+      this.ctx.logger.warn(new Error(`dsh-code-server: removed residual Copilot extensions (${purged.join(', ')})`))
+    }
     const args = [
       ...commonCodeServerArgs(this.config),
       '--bind-addr', `${this.config.host}:${String(this.config.port)}`,

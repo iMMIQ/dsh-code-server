@@ -90,6 +90,27 @@ describe('packaged extension completeness', () => {
     }
   })
 
+  it('routes editor chat through DSH without contributing a panel participant', async () => {
+    const extensionManifest = JSON.parse(await readProjectFile('extension/package.json')) as {
+      contributes: {
+        chatParticipants: { locations: string[] }[]
+        languageModelChatProviders: { vendor: string; isDefault: boolean }[]
+      }
+    }
+    expect(extensionManifest.contributes.chatParticipants[0]?.locations).toEqual(['editor', 'terminal'])
+    expect(extensionManifest.contributes.languageModelChatProviders).toContainEqual({
+      vendor: 'copilot',
+      displayName: 'DSH',
+      isDefault: true,
+    })
+
+    const source = await readProjectFile('extension/extension.js')
+    expect(source).toContain("registerLanguageModelChatProvider('copilot'")
+    expect(source).toContain("getConfiguration('chat.editor.localAgent')")
+    expect(source).toContain("getConfiguration('workbench.secondarySideBar')")
+    expect(source).toContain("executeCommand('workbench.action.closeAuxiliaryBar')")
+  })
+
   it('ships the extension entry, host lib, patch and launcher the profile boots', async () => {
     const manifest = JSON.parse(await readProjectFile('package.json')) as { files: string[] }
     for (const entry of [
