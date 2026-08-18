@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  chatCaptureStep, defaultCodeServerExecutable, installAskExtension, openCodeServerArgs,
-  parseAskRequest, pickLiveSession, resolveAskWorkspace, resolveOpenPath, summarizeToolResult, tokensEqual,
+  chatCaptureStep, containingWorkspaceRoot, defaultCodeServerExecutable, installAskExtension,
+  openCodeServerArgs, openFolderArgs, parseAskRequest, pickLiveSession, resolveAskWorkspace,
+  resolveOpenPath, summarizeToolResult, tokensEqual,
 } from '../src/index.ts'
 
 describe('host boundary', () => {
@@ -36,6 +37,39 @@ describe('host boundary', () => {
       '--disable-workspace-trust',
       '--reuse-window', '/workspace/a file.ts:8:3',
     ])
+  })
+
+  it('builds a bare folder-switch command without a line suffix', () => {
+    expect(openFolderArgs(
+      { userDataDir: '/state/user data', extensionsDir: '/state/extensions' },
+      '/workspaces/project b',
+    )).toEqual([
+      '--user-data-dir', '/state/user data',
+      '--extensions-dir', '/state/extensions',
+      '--disable-workspace-trust',
+      '--reuse-window', '/workspaces/project b',
+    ])
+  })
+
+  it('finds the longest registered root containing the file', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-code-server-'))
+    const nested = join(root, 'nested')
+    const deep = join(nested, 'deep.ts')
+    const top = join(root, 'top.ts')
+    await mkdir(nested)
+    await Promise.all([writeFile(deep, ''), writeFile(top, '')])
+    expect(await containingWorkspaceRoot(deep, [root, nested])).toBe(await realpath(nested))
+    expect(await containingWorkspaceRoot(deep, [nested, root])).toBe(await realpath(nested))
+    expect(await containingWorkspaceRoot(top, [root, nested])).toBe(await realpath(root))
+  })
+
+  it('maps outside files and vanished roots to no owning workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dsh-code-server-'))
+    const other = await mkdtemp(join(tmpdir(), 'dsh-code-server-'))
+    const file = join(root, 'a.ts')
+    await writeFile(file, '')
+    expect(await containingWorkspaceRoot(file, [other])).toBeUndefined()
+    expect(await containingWorkspaceRoot(file, [join(root, 'vanished')])).toBeUndefined()
   })
 
 })

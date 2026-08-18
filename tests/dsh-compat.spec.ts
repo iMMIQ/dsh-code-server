@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const DSH_ROOT = resolve(import.meta.dirname, '../../deepseek-harness')
+const FORK_ROOT = resolve(import.meta.dirname, '../third_party/code-server')
 
 describe('DeepSeek Harness 47f9438 compatibility seam', () => {
   it('still exposes the inherited string-only workspace opener', async () => {
@@ -116,5 +117,40 @@ describe('DeepSeek Harness 47f9438 compatibility seam', () => {
     expect(source).toContain('export function resolveWorkspacePath(cwd: string | undefined, path: string): string')
     expect(source).toContain('return path')
     expect(source).toContain('return `${base}/${rel}`')
+  })
+
+  it('still provides the sessions service the follower injects', async () => {
+    const source = await readFile(resolve(DSH_ROOT, 'packages/client/runtime/src/client/sessions/service.ts'), 'utf8')
+    expect(source).toContain("rootCtx.reflect.provide('sessions', this, undefined)")
+    expect(source).toContain('current: SessionId | undefined')
+  })
+
+  it('still exposes the workspaces list snapshot with session accounting', async () => {
+    const contract = await readFile(
+      resolve(DSH_ROOT, 'packages/client/runtime/src/client/contract/workspaces.ts'),
+      'utf8',
+    )
+    expect(contract).toContain('readonly list: ObservableSnapshot<WorkspaceListState>')
+    const view = await readFile(resolve(DSH_ROOT, 'packages/host/apiproxy/src/api/workspace.ts'), 'utf8')
+    expect(view).toContain('sessionIds: SessionId[]')
+    expect(view).toMatch(/\/\*\* Canonical directory path \(host-side realpath canon\)\. \*\/\n  path: string/)
+  })
+})
+
+describe('code-server fork 4.132.0-dsh.5 workspace-switch seam', () => {
+  it('still maps CLI directory args onto folderURIs', async () => {
+    const source = await readFile(resolve(FORK_ROOT, 'src/node/main.ts'), 'utf8')
+    expect(source).toContain('if (await isDirectory(fp)) {')
+    expect(source).toContain('pipeArgs.folderURIs.push(fp)')
+  })
+
+  it('still no-ops a same-folder reuse-window switch', async () => {
+    const source = await readFile(resolve(FORK_ROOT, 'lib/vscode/src/vs/code/browser/workbench/workbench.ts'), 'utf8')
+    expect(source).toContain('if (options?.reuse && !options.payload && this.isSame(this.workspace, workspace))')
+  })
+
+  it('still reports unconnected reuse-window opens as the retryable no-instance error', async () => {
+    const source = await readFile(resolve(FORK_ROOT, 'src/node/cli.ts'), 'utf8')
+    expect(source).toContain('No opened code-server instances found')
   })
 })

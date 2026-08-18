@@ -1,5 +1,5 @@
 import {
-  useEffect, useMemo, useRef, useSyncExternalStore,
+  useEffect, useRef, useState, useSyncExternalStore,
   type CSSProperties, type PointerEvent as ReactPointerEvent,
 } from 'react'
 import type { DrawerController } from './controller.ts'
@@ -17,12 +17,14 @@ function workbenchUrl(ideUrl: string, workspacePath: string | null): string {
 export function IdeDrawer({ controller }: IdeDrawerProps) {
   const rootRef = useRef<HTMLDivElement>(null)
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot)
-  const src = useMemo(
-    () => state.ideUrl === null || state.workspacePath === null
-      ? null
-      : workbenchUrl(state.ideUrl, state.workspacePath),
-    [state.ideUrl, state.workspacePath],
-  )
+  // The workbench URL latches once: afterwards folder changes travel through
+  // the host's open command, which navigates this iframe internally —
+  // re-assigning src here would only force a second reload of the same place.
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    if (src !== null || state.ideUrl === null || state.workspacePath === null) return
+    setSrc(workbenchUrl(state.ideUrl, state.workspacePath))
+  }, [src, state.ideUrl, state.workspacePath])
 
   useEffect(() => { void controller.refresh() }, [controller])
 
@@ -79,7 +81,15 @@ export function IdeDrawer({ controller }: IdeDrawerProps) {
           <button className="dcs-close" type="button" title="Close editor" aria-label="Close editor" onClick={() => { controller.setOpen(false) }} />
         </header>
         <div className="dcs-body">
-          {src !== null && <iframe className="dcs-frame" src={src} title="VS Code Workbench" allow="clipboard-read; clipboard-write" />}
+          {src !== null && (
+            <iframe
+              className="dcs-frame"
+              src={src}
+              title="VS Code Workbench"
+              allow="clipboard-read; clipboard-write"
+              onLoad={() => { controller.noteFrameReload() }}
+            />
+          )}
           {state.phase !== 'ready' && (
             <div className="dcs-state" role={state.phase === 'error' ? 'alert' : 'status'}>
               <span>{state.phase === 'error' ? (state.error ?? 'code-server unavailable') : 'Starting code-server...'}</span>

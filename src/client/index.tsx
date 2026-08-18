@@ -1,11 +1,18 @@
 import { DrawerController, installOpenPathAdapter } from './controller.ts'
+import { installWorkspaceFollow, type FollowSnapshotPort, type FollowSessionsSnapshot, type FollowWorkspacesSnapshot } from './follow.ts'
 import { IdeDrawer } from './IdeDrawer.tsx'
 import { BashRow, type BashRowProps } from './bash-row.tsx'
 import { ReadRow, type ReadRowProps } from './read-row.tsx'
 import { installStyles } from './styles.ts'
 
 interface BrowserContext {
-  workspaces: { openPath(path: string): Promise<void> }
+  workspaces: {
+    openPath(path: string): Promise<void>
+    list: FollowSnapshotPort<FollowWorkspacesSnapshot>
+  }
+  sessions: {
+    list: FollowSnapshotPort<FollowSessionsSnapshot>
+  }
   effect(effect: () => () => void, label: string): void
   slots: {
     inject(name: string, setup: () => (() => void) | Iterable<() => void>): () => void
@@ -20,8 +27,8 @@ interface BrowserContext {
   }
 }
 
-/** Browser services required by the overlay and compatibility adapter. */
-export const inject = ['slots', 'workspaces']
+/** Browser services required by the overlay, adapter, and session following. */
+export const inject = ['slots', 'workspaces', 'sessions']
 
 /** Register the embedded workbench and intercept DSH's existing file opener. */
 export function apply(ctx: BrowserContext): void {
@@ -29,7 +36,15 @@ export function apply(ctx: BrowserContext): void {
   ctx.effect(() => {
     const disposeStyles = installStyles()
     const disposeAdapter = installOpenPathAdapter(ctx.workspaces, path => controller.openFile(path))
+    // Follow the conversation: switching to a session of another workspace
+    // steers the workbench's folder there (and keeps the first drawer open
+    // off the first registered root).
+    const disposeFollow = installWorkspaceFollow(
+      { sessions: ctx.sessions.list, workspaces: ctx.workspaces.list },
+      folder => { void controller.followWorkspace(folder) },
+    )
     return () => {
+      disposeFollow()
       disposeAdapter()
       disposeStyles()
     }

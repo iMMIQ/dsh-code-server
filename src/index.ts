@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
-import { cp, mkdir, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { cp, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { isAbsolute, join, relative } from 'node:path'
@@ -245,8 +245,51 @@ export function openCodeServerArgs(
   return [...commonCodeServerArgs(config), '--reuse-window', `${request.path}:${request.line}:${request.column}`]
 }
 
+/**
+ * Build the folder-switch IPC command: a bare directory path. The workbench
+ * reuses the window, so the folder already showing is a no-op and any other
+ * folder navigates the window there.
+ */
+export function openFolderArgs(
+  config: Pick<ResolvedConfig, 'userDataDir' | 'extensionsDir'>,
+  folder: string,
+): string[] {
+  return [...commonCodeServerArgs(config), '--reuse-window', folder]
+}
+
+/**
+ * The registered workspace root that canonically contains `path` — the
+ * longest match wins when roots nest. Undefined when the path belongs to no
+ * workspace (e.g. scratch files under /tmp).
+ */
+export async function containingWorkspaceRoot(
+  path: string,
+  workspaceRoots: readonly string[],
+): Promise<string | undefined> {
+  const target = await realpath(path)
+  let best: string | undefined
+  for (const root of workspaceRoots) {
+    const real = await realpath(root).catch(() => undefined)
+    if (real !== undefined && contains(real, target) && (best === undefined || real.length > best.length)) best = real
+  }
+  return best
+}
+
 function messageOf(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason)
+}
+
+/** The CLI's "no connected workbench" failure — retryable by contract. */
+function isNoInstanceError(reason: unknown): boolean {
+  return /no opened code-server instances found/i.test(messageOf(reason))
+}
+
+async function isExistingDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 function sendJson(res: ServerResponse, status: number, value: unknown): void {
@@ -557,18 +600,59 @@ class CodeServerSidecar {
     this.state = { phase: 'ready' }
   }
 
-  async open(request: OpenRequest): Promise<void> {
+  /**
+   * Open `request` in the workbench, first steering the window's folder to
+   * `folder` when one is given. The folder command is a no-op when the window
+   * already shows it, so passing the file's owning workspace on every open is
+   * what keeps the explorer aligned with the conversation the row came from.
+   */
+  async open(request: OpenRequest, folder: string | undefined): Promise<void> {
     await this.startPromise
     if (this.state.phase !== 'ready') throw new Error('code-server is not ready')
-    const child = spawn(this.config.executable, openCodeServerArgs(this.config, request), {
+    if (folder !== undefined) await this.runOpenCommand(openFolderArgs(this.config, folder))
+    await this.runOpenCommand(openCodeServerArgs(this.config, request))
+  }
+
+  /** Switch the window's folder without opening anything (the follow spelling). */
+  async openFolder(folder: string): Promise<void> {
+    await this.startPromise
+    if (this.state.phase !== 'ready') throw new Error('code-server is not ready')
+    await this.runOpenCommand(openFolderArgs(this.config, folder))
+  }
+
+  /**
+   * Run one IPC open command, retrying across the workbench's reload window.
+   * Switching the window's folder reloads the browser page, and until the
+   * reloaded workbench re-registers its session the CLI refuses with "no
+   * opened code-server instances found" — that failure means "try again
+   * later", not "give up".
+   */
+  private async runOpenCommand(args: string[], attempts = 24, delayMs = 750): Promise<void> {
+    let last: unknown
+    for (let i = 0; i < attempts; i++) {
+      try {
+        await this.spawnOpen(args)
+        return
+      } catch (reason) {
+        if (!isNoInstanceError(reason)) throw reason
+        last = reason
+        await new Promise(resolve => { setTimeout(resolve, delayMs) })
+      }
+    }
+    throw last
+  }
+
+  private spawnOpen(args: string[]): Promise<void> {
+    const child = spawn(this.config.executable, args, {
       stdio: ['ignore', 'ignore', 'pipe'],
       env: codeServerEnv(),
     })
     let stderr = ''
     child.stderr?.setEncoding('utf8')
     child.stderr?.on('data', (chunk: string) => { stderr += chunk })
-    const code = await waitForExit(child)
-    if (code !== 0) throw new Error(stderr.trim() || `code-server open command exited with ${String(code)}`)
+    return waitForExit(child).then(code => {
+      if (code !== 0) throw new Error(stderr.trim() || `code-server open command exited with ${String(code)}`)
+    })
   }
 
   async stop(): Promise<void> {
@@ -652,8 +736,18 @@ export function apply(ctx: HostContext, rawConfig: Config = {}): void {
         try {
           const parsed = parseOpenRequest(await readJson(req))
           const path = await resolveOpenPath(parsed.path)
-          await sidecar.open({ ...parsed, path })
-          sendJson(res, 200, { ok: true, path })
+          // Keep the workbench's folder aligned with what is opened: a file
+          // first steers the window to its owning workspace; a directory
+          // request IS the follow spelling the drawer uses when the current
+          // session's workspace changes.
+          if (await isExistingDirectory(path)) {
+            await sidecar.openFolder(path)
+            sendJson(res, 200, { ok: true, path, folder: path })
+          } else {
+            const folder = await containingWorkspaceRoot(path, roots())
+            await sidecar.open({ ...parsed, path }, folder)
+            sendJson(res, 200, { ok: true, path, folder: folder ?? null })
+          }
         } catch (reason) {
           sendJson(res, 400, { error: messageOf(reason) })
         }

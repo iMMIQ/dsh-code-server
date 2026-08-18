@@ -16,6 +16,11 @@ interface StatusResponse {
   message?: unknown
 }
 
+interface OpenResponse {
+  error?: unknown
+  folder?: unknown
+}
+
 const STATUS_PATH = '/dsh-code-server/status'
 const OPEN_PATH = '/dsh-code-server/open'
 const WIDTH_KEY = 'dsh-code-server.drawer-width'
@@ -44,6 +49,8 @@ export class DrawerController {
 
   private readonly listeners = new Set<() => void>()
   private statusRequest: Promise<void> | null = null
+  private followToken = 0
+  private readonly frameReloadWaiters = new Set<() => void>()
 
   readonly subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener)
@@ -82,16 +89,19 @@ export class DrawerController {
         if (!response.ok) throw new Error(`status request failed (${String(response.status)})`)
         const ideUrl = typeof body.ideUrl === 'string' ? body.ideUrl : null
         const workspacePath = typeof body.workspacePath === 'string' ? body.workspacePath : null
+        // The status root is only the fallback for the very first workbench
+        // load; once following has picked a folder, that bookkeeping wins.
+        const effectiveWorkspacePath = this.snapshot.workspacePath ?? workspacePath
         if (body.phase === 'error') throw new Error(typeof body.message === 'string' ? body.message : 'code-server failed')
         if (body.phase !== 'ready' || ideUrl === null) {
-          this.update({ phase: 'loading', ideUrl, workspacePath })
+          this.update({ phase: 'loading', ideUrl, workspacePath: effectiveWorkspacePath })
           window.setTimeout(() => { void this.refresh(true) }, 500)
           return
         }
-        this.update({ phase: 'ready', ideUrl, workspacePath, error: null })
+        this.update({ phase: 'ready', ideUrl, workspacePath: effectiveWorkspacePath, error: null })
         // Do not create a no-folder Workbench: code-server registers that as
         // an empty editor session, and reuse-window can fail while scanning it.
-        if (workspacePath === null) window.setTimeout(() => { void this.refresh(true) }, 1_000)
+        if (effectiveWorkspacePath === null) window.setTimeout(() => { void this.refresh(true) }, 1_000)
       })
       .catch(reason => { this.update({ phase: 'error', error: errorMessage(reason) }) })
       .finally(() => { if (this.statusRequest === request) this.statusRequest = null })
@@ -108,12 +118,102 @@ export class DrawerController {
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify(openTarget(path)),
       })
-      const body = await response.json() as { error?: unknown }
+      const body = await response.json() as OpenResponse
       if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : `open failed (${String(response.status)})`)
+      // The host steers the workbench to the file's owning workspace first;
+      // mirror that switch so later comparisons know which folder is showing.
+      if (typeof body.folder === 'string' && body.folder !== this.snapshot.workspacePath) {
+        this.update({ workspacePath: body.folder })
+      }
     } catch (reason) {
       this.update({ phase: 'error', error: errorMessage(reason) })
       throw reason
     }
+  }
+
+  /**
+   * Point the workbench at the workspace of the conversation the user is
+   * looking at. A no-op when that folder already shows; otherwise a bare
+   * folder open the host maps onto a same-window switch. Best-effort by
+   * design — a failure here never surfaces as a drawer error.
+   */
+  async followWorkspace(folder: string): Promise<void> {
+    if (this.snapshot.workspacePath === folder) return
+    this.update({ workspacePath: folder, currentPath: folder })
+    if (!(await this.waitForReady())) return
+    // The workbench silently drops pipe opens for the first seconds after
+    // its page loads (the CLI pipe answers, the command chain is not wired
+    // yet), and following fires exactly then. Re-issue the switch until the
+    // workbench frame actually navigates — its load event is the only
+    // client-visible signal — with a token so a newer follow supersedes
+    // stale rounds. A landed switch makes later rounds no-ops (reusing the
+    // shown folder never reloads the workbench).
+    const token = ++this.followToken
+    for (let round = 0; round < 5; round++) {
+      if (token !== this.followToken) return
+      const reloaded = this.waitForFrameReload(10_000)
+      if (!(await this.postOpen(folder))) return
+      if (await reloaded) return
+    }
+  }
+
+  /** One best-effort open POST; false means "stop following". */
+  private async postOpen(path: string): Promise<boolean> {
+    try {
+      const response = await fetch(OPEN_PATH, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify(openTarget(path)),
+      })
+      if (!response.ok) return false
+      const body = await response.json() as OpenResponse
+      if (typeof body.folder === 'string' && body.folder !== this.snapshot.workspacePath) {
+        this.update({ workspacePath: body.folder })
+      }
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  /** Poll the sidecar status until the workbench is usable (bounded). */
+  private async waitForReady(deadlineMs = 30_000): Promise<boolean> {
+    void this.refresh()
+    const start = Date.now()
+    while (Date.now() - start < deadlineMs) {
+      if (this.snapshot.phase === 'error') {
+        this.update({ phase: 'loading', error: null })
+        void this.refresh(true)
+      }
+      if (this.snapshot.phase === 'ready') return true
+      await new Promise(resolve => { window.setTimeout(resolve, 1_000) })
+    }
+    return this.snapshot.phase === 'ready'
+  }
+
+  /** Resolve waiting follow rounds when the workbench frame navigates. */
+  noteFrameReload(): void {
+    const waiters = [...this.frameReloadWaiters]
+    this.frameReloadWaiters.clear()
+    for (const waiter of waiters) waiter()
+  }
+
+  private waitForFrameReload(timeoutMs: number): Promise<boolean> {
+    return new Promise(resolve => {
+      const waiter = (): void => {
+        cleanup()
+        resolve(true)
+      }
+      const timer = window.setTimeout(() => {
+        cleanup()
+        resolve(false)
+      }, timeoutMs)
+      const cleanup = (): void => {
+        window.clearTimeout(timer)
+        this.frameReloadWaiters.delete(waiter)
+      }
+      this.frameReloadWaiters.add(waiter)
+    })
   }
 }
 

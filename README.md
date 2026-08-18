@@ -12,8 +12,12 @@ Current release: **v0.1.5** · VS Code `1.132.0` · Linux & macOS (amd64 / arm64
 - **A full VS Code workbench in DSH Web.** Editor, integrated terminal, Git,
   extensions and language servers run in a right-hand drawer that docks beside
   the conversation or floats above it.
+- **The workbench follows your conversation.** Switching to a session of
+  another registered DSH workspace steers the editor to that workspace
+  instead of staying pinned to the first one.
 - **File references open in the editor.** Click a file path shown by a
-  conversation tool call and it opens in the running workbench; read rows land
+  conversation tool call and it opens in the running workbench — the window
+  first switches to the file's owning workspace when needed; read rows land
   on the line the agent was reading.
 - **A native Chat view connected to your DSH session.** Replies stream in as
   they are generated; each tool call leaves a `✓ read src/index.ts · 12ms`
