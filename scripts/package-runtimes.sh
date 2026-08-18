@@ -8,7 +8,7 @@ output_dir=${1:?usage: package-runtimes.sh OUTPUT_DIR}
 # from drifting apart — the mismatch that broke the v0.1.4 release boot.
 code_server_version=$(node -p "require('node:fs').readFileSync('$repo_root/src/index.ts','utf8').match(/BUNDLED_CODE_SERVER_VERSION = '([^']+)'/)[1]")
 code_server_repo=iMMIQ/code-server
-code_server_commit=024c825037fda0f687b0247f1dd915fa88c8c1eb
+code_server_commit=07f611cb3bb9d73f97fef164568eee015b3133d2
 package_version=$(node -p "require('$repo_root/package.json').version")
 archive_dir=${CODE_SERVER_ARCHIVE_DIR:-}
 download_dir=
@@ -38,23 +38,23 @@ thin_package="$work_dir/dsh-code-server-$package_version.tgz"
 
 checksum_for() {
   case "$1" in
-    # dsh.5: all four from the fork's v4.132.0-dsh.5 release (built by its
-    # CI from 024c8250; local builds are not byte-reproducible, so the
+    # dsh.6: all four from the fork's v4.132.0-dsh.6 release (built by its
+    # CI from 07f611cb; local builds are not byte-reproducible, so the
     # release archives are the source of truth).
-    linux-amd64) echo cd58483a5606479ce7446b9313f352bb05a62ed48f0daf0a25a40b728474fd86 ;;
-    linux-arm64) echo 6894eff09bb017330e7ece0e91d5bc57831f46284b787ca70aaed3118852e9d4 ;;
-    macos-amd64) echo 73715f2141ab88135a402c59e55683346319cb73fe212cc789d93e79453ab84b ;;
-    macos-arm64) echo 67baf6777be91175d602db44afbe821dad7fb07ce205bfc15ae5543568382cf5 ;;
+    linux-amd64) echo 42c59b27c407b9d77c12ead93b897e0f168c7a672074cdfcce6dfd0bb34b3fc0 ;;
+    linux-arm64) echo d48439e799da98b1ef9830b664e6b06ff093a122485f707ac43b22d0786ac6fb ;;
+    macos-amd64) echo 5478057578f400814ba25b9b3dcdfc6d4f682d55c4e66368d76c15525ceef0ac ;;
+    macos-arm64) echo 84900cf71f2db5138aa4e5ce8e918aaa688d6ad5bbe281beaae8eba73f764fb3 ;;
     *) return 1 ;;
   esac
 }
 
 descriptor_for() {
   case "$1" in
-    linux-amd64) printf '%s\n' '{"platform":"linux","arch":"x64","version":"4.132.0-dsh.5"}' ;;
-    linux-arm64) printf '%s\n' '{"platform":"linux","arch":"arm64","version":"4.132.0-dsh.5"}' ;;
-    macos-amd64) printf '%s\n' '{"platform":"darwin","arch":"x64","version":"4.132.0-dsh.5"}' ;;
-    macos-arm64) printf '%s\n' '{"platform":"darwin","arch":"arm64","version":"4.132.0-dsh.5"}' ;;
+    linux-amd64) printf '%s\n' '{"platform":"linux","arch":"x64","version":"4.132.0-dsh.6"}' ;;
+    linux-arm64) printf '%s\n' '{"platform":"linux","arch":"arm64","version":"4.132.0-dsh.6"}' ;;
+    macos-amd64) printf '%s\n' '{"platform":"darwin","arch":"x64","version":"4.132.0-dsh.6"}' ;;
+    macos-arm64) printf '%s\n' '{"platform":"darwin","arch":"arm64","version":"4.132.0-dsh.6"}' ;;
     *) return 1 ;;
   esac
 }

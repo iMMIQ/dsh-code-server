@@ -106,7 +106,7 @@ const BUNDLED_RUNTIME_LAUNCHER = fileURLToPath(new URL('../bin/dsh-code-server-r
 // script, the package.json `dsh.bundledCodeServerVersion` metadata and the
 // release smoke tests all derive from (or are pinned against) this constant;
 // tests/packaging.spec.ts fails the build when any of them drifts.
-const BUNDLED_CODE_SERVER_VERSION = '4.132.0-dsh.5'
+const BUNDLED_CODE_SERVER_VERSION = '4.132.0-dsh.6'
 
 /** Prefer the platform-specific runtime shipped in a full release package. */
 export function defaultCodeServerExecutable(runtimeDir = BUNDLED_RUNTIME_DIR): string {

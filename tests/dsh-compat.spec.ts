@@ -137,7 +137,7 @@ describe('DeepSeek Harness 47f9438 compatibility seam', () => {
   })
 })
 
-describe('code-server fork 4.132.0-dsh.5 chat-routing seam', () => {
+describe('code-server fork 4.132.0-dsh.6 chat-routing seam', () => {
   it('still defaults the chat session target to the local agent we disable', async () => {
     const constants = await readFile(
       resolve(FORK_ROOT, 'lib/vscode/src/vs/workbench/contrib/chat/common/constants.ts'),
@@ -194,7 +194,7 @@ describe('code-server fork 4.132.0-dsh.5 chat-routing seam', () => {
   })
 })
 
-describe('code-server fork 4.132.0-dsh.5 workspace-switch seam', () => {
+describe('code-server fork 4.132.0-dsh.6 workspace-switch seam', () => {
   it('still maps CLI directory args onto folderURIs', async () => {
     const source = await readFile(resolve(FORK_ROOT, 'src/node/main.ts'), 'utf8')
     expect(source).toContain('if (await isDirectory(fp)) {')
